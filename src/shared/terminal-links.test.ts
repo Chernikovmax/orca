@@ -153,6 +153,19 @@ describe('terminal path helpers', () => {
       })
     })
 
+    it('ends a path at its extension when a sentence period follows', () => {
+      const line =
+        'in this workspace: ~/orca-qa/linear-triage/reports/2026-10-26-untriaged.html. My earlier 27-issue version is still in'
+      for (const links of [
+        extractTerminalFileLinks(line),
+        extractTerminalFileLinkCandidates(line)
+      ]) {
+        expect([...new Set(links.map((link) => link.pathText))]).toEqual([
+          '~/orca-qa/linear-triage/reports/2026-10-26-untriaged.html'
+        ])
+      }
+    })
+
     it('detects an extensionless absolute path ending in a spaced segment', () => {
       const links = extractTerminalFileLinks('/Users/alice/My Folder')
       expect(links).toHaveLength(1)

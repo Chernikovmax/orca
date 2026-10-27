@@ -113,7 +113,8 @@ function trimSpacedPathTrailingProse(
 ): DetectedTerminalFileLinkRange {
   // Trim prose/unrelated paths after extension-terminated candidates. Extend only path-like added segments (v1.2 reports/result.json), never prose such as failed to start app.py.
   let selected: string | null = null
-  const extensionPrefixPattern = /\.[A-Za-z0-9_+-]+(?::\d+)?(?::\d+)?(?=\s+|$)/g
+  // Why the punctuation: a path ending a sentence (`see ~/a/report.html. Next`) still ends at its extension.
+  const extensionPrefixPattern = /\.[A-Za-z0-9_+-]+(?::\d+)?(?::\d+)?(?=[.:!?]*(?:\s|$))/g
   const pathStartPattern = /(?:^|\s)(?:~[\\/]|[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/])/g
   let pathStartCount = 0
   let nextPathStart = pathStartPattern.exec(range.text)
