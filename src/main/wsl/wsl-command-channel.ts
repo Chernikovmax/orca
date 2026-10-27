@@ -2,6 +2,9 @@ import { Duplex } from 'node:stream'
 import type { PipedChildProcess } from '@orca/process-host/process-spec'
 import type { RemoteCommandChannel } from '../managed-server/install/remote-install-transport'
 
+/** How long a closed channel's guest gets to exit on stdin EOF before wsl.exe is killed. */
+export const WSL_CHANNEL_CLOSE_GRACE_MS = 2_000
+
 /** Expose wsl.exe stdio as an SSH-style channel; exit reports status and close follows stdio teardown. */
 export function wrapWslCommandProcess(child: PipedChildProcess): RemoteCommandChannel {
   // Only the child emits close, once after exit status, like ssh2.
@@ -58,9 +61,19 @@ export function wrapWslCommandProcess(child: PipedChildProcess): RemoteCommandCh
     stdin: child.stdin,
     stderr: child.stderr,
     close: () => {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill()
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return
       }
+      // EOF first: a guest that exits on its own ends its WSL session; a killed wsl.exe can leave
+      // the session behind (a lingering wslhost.exe), which keeps an idle distro running.
+      child.stdin.end()
+      const timer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill()
+        }
+      }, WSL_CHANNEL_CLOSE_GRACE_MS)
+      timer.unref?.()
+      child.once('exit', () => clearTimeout(timer))
     }
   })
   return channel
