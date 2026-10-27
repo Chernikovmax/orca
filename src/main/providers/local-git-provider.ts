@@ -3,6 +3,7 @@ import type { GitRuntimeOptions } from '../git/git-runtime-options'
 import { checkIgnoredPaths } from '../git/check-ignored-paths'
 import { checkoutBranch, listLocalBranches } from '../git/checkout'
 import { getHistory } from '../git/history'
+import { getWorkspaceCommitCompare } from '../git/source-control/git-workspace-history'
 import { gitFastForward, gitFetch, gitPull, gitPullRebaseFromBase, gitPush } from '../git/remote'
 import { getRemoteCommitUrl, getRemoteFileUrl, isGitRepo } from '../git/repo'
 import { awaitWindowsHostGitEnvironmentReady, gitExecFileAsync } from '../git/runner'
@@ -77,8 +78,10 @@ export function createLocalGitProvider(options: LocalGitProviderOptions = {}): L
       getHistory(worktreePath, { ...historyOptions, ...interactive }),
     commit: (worktreePath, message) => commitChanges(worktreePath, message, interactive),
     getStagedCommitContext: (worktreePath) => getStagedCommitContext(worktreePath, interactive),
-    getDiff: (worktreePath, filePath, staged, compareAgainstHead) =>
-      getDiff(worktreePath, filePath, staged, compareAgainstHead, interactive),
+    getDiff: (worktreePath, filePath, staged, compareAgainstHead, selection) =>
+      selection
+        ? getDiff(worktreePath, filePath, staged, compareAgainstHead, interactive, selection)
+        : getDiff(worktreePath, filePath, staged, compareAgainstHead, interactive),
     stageFile: (worktreePath, filePath) => stageFile(worktreePath, filePath, interactive),
     unstageFile: (worktreePath, filePath) => unstageFile(worktreePath, filePath, interactive),
     bulkStageFiles: async (worktreePath, filePaths, scope) => {
@@ -106,8 +109,18 @@ export function createLocalGitProvider(options: LocalGitProviderOptions = {}): L
         ...base,
         admissionTier: compareOptions?.admissionTier ?? 'interactive'
       }),
-    getCommitCompare: (worktreePath, commitId) =>
-      getCommitCompare(worktreePath, commitId, interactive),
+    getCommitCompare: (worktreePath, commitId, compareOptions) =>
+      compareOptions?.contextId || compareOptions?.baseOid
+        ? getWorkspaceCommitCompare(
+            worktreePath,
+            {
+              contextId: compareOptions.contextId,
+              commitOid: commitId,
+              baseOid: compareOptions.baseOid
+            },
+            interactive
+          )
+        : getCommitCompare(worktreePath, commitId, interactive),
     getUpstreamStatus: (worktreePath, pushTarget) =>
       getUpstreamStatus(worktreePath, pushTarget, base),
     pushBranch: (worktreePath, publish, pushTarget, pushOptions) =>

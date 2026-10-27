@@ -1,5 +1,6 @@
 import type { GitBranchChangeStatus } from './git-status-types'
 import type { LargeDiffRenderLimit } from './large-diff-render-limit'
+import type { GitDiffDocument } from './git-diff-document'
 
 // ─── Git Status ─────────────────────────────────────────────
 // Re-exported from git-status-types.ts so mobile shares the wire contract without this desktop aggregate.
@@ -36,7 +37,7 @@ export type GitCommitCompareSummary = {
   compareRef: string
   baseRef: string
   changedFiles: number
-  status: 'ready' | 'invalid-commit' | 'error'
+  status: 'ready' | 'invalid-commit' | 'invalid-base' | 'error'
   errorMessage?: string
 }
 
@@ -69,4 +70,6 @@ export type GitDiffBinaryResult = {
   | { originalIsBinary: boolean; modifiedIsBinary: true }
 )
 
-export type GitDiffResult = GitDiffTextResult | GitDiffBinaryResult
+export type GitDiffResult = (GitDiffTextResult | GitDiffBinaryResult) & {
+  document?: GitDiffDocument
+}

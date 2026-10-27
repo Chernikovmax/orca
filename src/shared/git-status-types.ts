@@ -1,3 +1,5 @@
+import type { GitWorkspaceSnapshot } from './git-workspace-types'
+
 export type GitFileStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'copied'
 export type GitStagingArea = 'staged' | 'unstaged' | 'untracked'
 export type GitConflictKind =
@@ -66,8 +68,11 @@ export type GitBranchLineTotal = {
 }
 
 export type GitStatusResult = {
+  workspace?: GitWorkspaceSnapshot
   entries: GitStatusEntry[]
   conflictOperation: GitConflictOperation
+  /** True when a merge/rebase/cherry-pick is unfinished; `conflictOperation` alone cannot say. */
+  operationInProgress?: boolean
   head?: string
   branch?: string
   // Why: porcelain v2 status already includes upstream/ahead/behind metadata.

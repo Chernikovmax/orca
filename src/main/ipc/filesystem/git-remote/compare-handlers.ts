@@ -3,7 +3,8 @@ import type {
   GitBranchCompareResult,
   GitCommitCompareResult
 } from '../../../../shared/git-diff-compare-types'
-import { getBranchCompare, getCommitCompare } from '../../../git/status'
+import { getBranchCompare } from '../../../git/status'
+import { getWorkspaceCommitCompare } from '../../../git/source-control/git-workspace-history'
 import { resolveRegisteredWorktreePath } from '../../registered-worktree-roots-cache'
 import { getLocalGitOptionsForRegisteredWorktree } from '../../local-worktree-runtime-options'
 import { validateFullGitObjectId } from '../../filesystem-path-containment'
@@ -44,9 +45,19 @@ export function registerGitRemoteCompareHandlers(context: FilesystemHandlerConte
     'git:commitCompare',
     async (
       _event,
-      args: { worktreePath: string; commitId: string; connectionId?: string }
+      args: {
+        worktreePath: string
+        commitId: string
+        contextId?: string
+        baseOid?: string | null
+        connectionId?: string
+      }
     ): Promise<GitCommitCompareResult> => {
       const commitId = validateFullGitObjectId(args.commitId, 'commitId')
+      const baseOid =
+        args.baseOid === undefined || args.baseOid === null
+          ? undefined
+          : validateFullGitObjectId(args.baseOid, 'baseOid')
       requireReachableGitRoute(getConnectionExecutionHostId(args.connectionId))
       const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
       const gitOptions = getLocalGitOptionsForRegisteredWorktree(
@@ -54,7 +65,11 @@ export function registerGitRemoteCompareHandlers(context: FilesystemHandlerConte
         args.worktreePath,
         worktreePath
       )
-      return getCommitCompare(worktreePath, commitId, gitOptions)
+      return getWorkspaceCommitCompare(
+        worktreePath,
+        { contextId: args.contextId, commitOid: commitId, baseOid },
+        gitOptions
+      )
     }
   )
 }

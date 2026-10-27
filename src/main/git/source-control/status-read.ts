@@ -20,7 +20,7 @@ import {
 } from '../worktree-symlink-detection'
 import type { GetStatusOptions } from './get-status-options'
 import { statusReadLeaseOwner } from './git-read-cache-invalidation'
-import { detectConflictOperation } from './git-conflict-operation'
+import { detectConflictOperationState } from './git-conflict-operation'
 import { parseUnmergedEntry } from '../../../shared/git-status-conflict-entries'
 import { getEffectiveUpstreamStatusCacheKey } from './effective-upstream-status-cache'
 import {
@@ -34,6 +34,7 @@ import {
   getStatusLineStatsCacheKey
 } from './status-branch-line-total-input'
 import { reconcileDriveCheckoutSuspects } from './drive-checkout-suspect-status'
+import { getWorkspaceStatus } from './git-workspace-status'
 
 /**
  * Parse `git status --porcelain=v2` output into structured entries.
@@ -42,6 +43,11 @@ export async function getStatus(
   worktreePath: string,
   options: GetStatusOptions = {}
 ): Promise<GitStatusResult> {
+  if (options.includeWorkspace) {
+    return getWorkspaceStatus(worktreePath, options, (cwd, readOptions) =>
+      runGetStatus(cwd, readOptions, true)
+    )
+  }
   // Why nothing is cleared here: a status poll is a read. Dropping the in-flight diff entry
   // mid-read only made a concurrent identical request start duplicate git work, and the
   // settled diff cache is keyed on stamped git state, which a read cannot change anyway.
@@ -121,7 +127,8 @@ async function dropSharedSymlinkUntrackedEntries(
 
 async function runGetStatus(
   worktreePath: string,
-  options: GetStatusOptions = {}
+  options: GetStatusOptions = {},
+  workspaceRead = false
 ): Promise<GitStatusResult> {
   const lineStatsCacheKey = getStatusLineStatsCacheKey(worktreePath, options)
   const lineStatsWriteToken =
@@ -132,7 +139,7 @@ async function runGetStatus(
   const limit = resolveGitStatusLimit(options.limit)
 
   // Why: detectConflictOperation and git status are independent, so run them concurrently to save I/O latency.
-  const conflictPromise = detectConflictOperation(worktreePath, options)
+  const conflictPromise = detectConflictOperationState(worktreePath, options)
   // Why: core.quotePath=false keeps non-ASCII paths as raw UTF-8, not octal escapes, so entry.path is readable and lookups match.
   const statusArgs = [
     '-c',
@@ -142,6 +149,10 @@ async function runGetStatus(
     '--branch',
     '--untracked-files=all'
   ]
+  if (workspaceRead) {
+    statusArgs.unshift('-c', 'core.fsmonitor=false')
+    statusArgs.push('--ignore-submodules=all')
+  }
   if (options.includeIgnored) {
     statusArgs.push('--ignored=matching')
   }
@@ -158,7 +169,9 @@ async function runGetStatus(
         admissionTier: options.admissionTier,
         preferWslDirectGit: true,
         // Why: status polling is read-like; disable optional locks to avoid racing terminal Git on index.lock.
-        env: gitOptionalLocksDisabledEnv(),
+        env: workspaceRead
+          ? { ...gitOptionalLocksDisabledEnv(), GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '' }
+          : gitOptionalLocksDisabledEnv(),
         signal: options.signal,
         onStdout: (chunk) => parser.update(chunk, limit)
       })
@@ -168,7 +181,8 @@ async function runGetStatus(
       return result
     })()
   ])
-  const conflictOperation = await conflictPromise
+  const conflictState = await conflictPromise
+  const conflictOperation = conflictState.operation
 
   try {
     const [statusResult] = await statusSettlementPromise
@@ -179,7 +193,7 @@ async function runGetStatus(
     statusSucceeded = true
   } catch (error) {
     // Why: an aborted scan must reject, not resolve as an empty result.
-    if (options.signal?.aborted) {
+    if (options.signal?.aborted || workspaceRead) {
       throw error
     }
     // Not a git repo or git not available
@@ -206,12 +220,17 @@ async function runGetStatus(
     }
   }
 
-  if (statusSucceeded && !didHitLimit) {
+  if (statusSucceeded && !didHitLimit && !workspaceRead) {
     entries = await reconcileDriveCheckoutSuspects(worktreePath, entries, options)
   }
   await dropSharedSymlinkUntrackedEntries(worktreePath, entries, options)
 
-  if (statusSucceeded && !didHitLimit && shouldProbeEffectiveUpstreamStatus(branch, upstreamName)) {
+  if (
+    statusSucceeded &&
+    !didHitLimit &&
+    !workspaceRead &&
+    shouldProbeEffectiveUpstreamStatus(branch, upstreamName)
+  ) {
     const branchName = getShortBranchName(branch)
     if (branchName) {
       const cacheKey = getEffectiveUpstreamStatusCacheKey(
@@ -272,6 +291,7 @@ async function runGetStatus(
   return {
     entries,
     conflictOperation,
+    operationInProgress: conflictState.inProgress,
     head,
     branch,
     ...(options.includeIgnored ? { ignoredPaths: parser.ignoredPaths } : {}),

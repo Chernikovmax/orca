@@ -1,6 +1,10 @@
 import type { GitRuntimeOptions } from '../git-runtime-options'
 
 export type GetStatusOptions = GitRuntimeOptions & {
+  includeWorkspace?: boolean
+  workspaceRefsContextId?: string
+  /** Set by the authorized host route, never accepted as renderer authority. */
+  executionHostId?: string
   includeIgnored?: boolean
   includeLineStats?: boolean
   reuseLineStats?: boolean

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { PanelRight } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
@@ -27,6 +27,8 @@ import { RightSidebarTopActivityBar } from './right-sidebar-top-activity-bar'
 import { useRightSidebarActivityItems } from './use-right-sidebar-activity-items'
 import { useRightSidebarTabRouting } from './use-right-sidebar-tab-routing'
 import { useWindowWidth } from './use-window-width'
+import { addAppKeyListener, removeAppKeyListener } from '@/lib/app-keyboard-router'
+import { requestGitContextPopup } from '@/lib/git-context-popup-command'
 
 const ACTIVITY_BAR_SIDE_WIDTH = 40
 
@@ -58,6 +60,31 @@ function RightSidebarInner(): React.JSX.Element {
     pluginFetchStatus,
     installedPluginTabKeys
   })
+  useEffect(() => {
+    const openContexts = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        !event.ctrlKey ||
+        !event.altKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.code !== 'KeyG'
+      ) {
+        return
+      }
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const store = useAppStore.getState()
+      if (!store.rightSidebarOpen) {
+        store.toggleRightSidebar()
+      }
+      selectActivityTab('source-control')
+      requestGitContextPopup()
+    }
+    addAppKeyListener('keydown', openContexts)
+    return () => removeAppKeyListener('keydown', openContexts)
+  }, [selectActivityTab])
 
   const activityBarSideWidth = activityBarPosition === 'side' ? ACTIVITY_BAR_SIDE_WIDTH : 0
   const windowWidth = useWindowWidth()

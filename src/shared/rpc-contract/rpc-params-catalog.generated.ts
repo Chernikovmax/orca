@@ -231,6 +231,7 @@ import {
   FolderWorkspaceSelector,
   FolderWorkspaceUpdate
 } from './folder-workspace-params'
+import { GitMutate } from './git-mutation-params'
 import {
   GitBranchCompare,
   GitBranchDiff,
@@ -248,6 +249,7 @@ import {
   GitGenerateCommitMessage,
   GitGeneratePullRequestFields,
   GitHistory,
+  GitMutationProgressParams,
   GitPush,
   GitRebaseFromBase,
   GitRemoteCommitUrl,
@@ -979,7 +981,9 @@ export const RPC_PARAMS_BY_METHOD = {
   'git.generatePullRequestFields': GitGeneratePullRequestFields,
   'git.history': GitHistory,
   'git.localBranches': WorktreeSelectorOfGitParams,
+  'git.mutate': GitMutate,
   'git.mutationInFlight': WorktreeSelectorOfGitParams,
+  'git.mutationProgress': GitMutationProgressParams,
   'git.pull': GitTargetedRemote,
   'git.push': GitPush,
   'git.rebaseFromBase': GitRebaseFromBase,

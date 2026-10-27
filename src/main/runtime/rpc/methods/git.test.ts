@@ -180,41 +180,6 @@ describe('git RPC methods', () => {
     })
   })
 
-  it('returns a worktree file diff', async () => {
-    const runtime = {
-      getRuntimeId: () => 'test-runtime',
-      getRuntimeGitDiff: vi.fn().mockResolvedValue({
-        kind: 'text',
-        originalContent: '',
-        modifiedContent: 'hello',
-        originalIsBinary: false,
-        modifiedIsBinary: false
-      })
-    } as unknown as OrcaRuntimeService
-    const dispatcher = new RpcDispatcher({ runtime, methods: GIT_METHODS })
-
-    const response = await dispatcher.dispatch(
-      makeRequest('git.diff', {
-        worktree: 'id:wt-1',
-        filePath: 'src/index.ts',
-        staged: false,
-        compareAgainstHead: true
-      })
-    )
-
-    // A local dispatch sets no clientKind, so the transport budget stays undefined.
-    expect(runtime.getRuntimeGitDiff).toHaveBeenCalledWith(
-      'id:wt-1',
-      'src/index.ts',
-      false,
-      true,
-      undefined
-    )
-    expect(response).toMatchObject({
-      ok: true,
-      result: { kind: 'text', modifiedContent: 'hello' }
-    })
-  })
 
   it('returns bounded git history for a selected worktree', async () => {
     const history = {

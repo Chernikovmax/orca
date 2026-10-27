@@ -1,30 +1,16 @@
-import * as path from 'node:path'
 import type { GitDiffResult } from '../../../shared/git-diff-compare-types'
-import { resolveWorktreeHostPath } from '../../../shared/git-metadata-path'
+import type { GitDiffSelection } from '../../../shared/git-diff-document'
+import { readFileDiffDocument, validateDiffPath } from './git-diff-document-read'
+import { getStatus } from './status-read'
+import { verifyWorkspaceContext } from './git-workspace-context'
+import type { GetStatusOptions } from './get-status-options'
 import { stableInFlightKey } from '../../../shared/in-flight-promise-dedupe'
 import type { GitRuntimeOptions } from '../git-runtime-options'
 import { gitRuntimeOptionsKey } from './git-runtime-options-cache-key'
 import { gitDiffReadDedupe, settledDiffCache } from './git-read-cache-invalidation'
 import { readWorktreeDiffStamp } from './worktree-diff-stamp'
-import { buildDiffResult } from './diff-result'
-import {
-  type GitBlobReadResult,
-  readGitBlobAtIndexPath,
-  readGitBlobAtOidPath,
-  readUnstagedLeftBlob,
-  readWorkingTreeFile
-} from './git-blob-read'
-import {
-  findContainingSubmodule,
-  listSubmodulePaths,
-  resolveSubmoduleWorktreePath
-} from './submodule-paths'
-import {
-  readGitlinkOidFromIndex,
-  readGitlinkOidFromTree,
-  readWorkingSubmoduleHead
-} from './submodule-gitlink-oid'
-import { buildSubmoduleInnerCommitRangeDiff, buildSubmodulePointerDiff } from './submodule-diff'
+import { findContainingSubmodule, listSubmodulePaths } from './submodule-paths'
+import { getCommitDiff } from './commit-diff'
 
 /**
  * Get original and modified content for diffing a file.
@@ -34,8 +20,31 @@ export async function getDiff(
   filePath: string,
   staged: boolean,
   compareAgainstHead = false,
-  options: GitRuntimeOptions = {}
+  options: GetStatusOptions = {},
+  selection?: GitDiffSelection
 ): Promise<GitDiffResult> {
+  filePath = validateDiffPath(filePath)
+  if (selection?.contextId) {
+    const snapshot = (await getStatus(worktreePath, { ...options, includeWorkspace: true, includeLineStats: false })).workspace
+    const repository = snapshot?.repositories.find((item) => item.context.id === selection.contextId)
+    if (!repository) {
+      throw new Error('Access denied: Git context is not available in this authorized worktree')
+    }
+    await verifyWorkspaceContext(repository.context, options)
+    const result = await readFileDiffDocument(repository.context.checkoutPath, filePath, selection, options)
+    const module = snapshot?.submodules.find((item) => item.parentContextId === repository.context.id && item.path === [snapshot.submodules.find((item) => item.contextId === repository.context.id)?.path, filePath].filter(Boolean).join('/'))
+    if (result.document?.special === 'gitlink' && module) {
+      result.document.childContextId = module.contextId
+      if (selection.right.kind === 'worktree') {
+        result.document.right.oid = module.currentOid
+      }
+    }
+    await verifyWorkspaceContext(repository.context, options)
+    return result
+  }
+  if (selection) {
+    return readFileDiffDocument(worktreePath, filePath, selection, options)
+  }
   const readKey = stableInFlightKey([
     'diff',
     worktreePath,
@@ -104,120 +113,43 @@ async function loadDiff(
   compareAgainstHead: boolean,
   options: GitRuntimeOptions
 ): Promise<LoadedDiff> {
-  // Why: gitlink paths can't be read as blobs, so route submodule diffs explicitly (root → pointer, inner → recurse).
   const submodulePaths = await listSubmodulePaths(worktreePath, options)
-  if (submodulePaths.length > 0) {
-    const matchedSubmodule = findContainingSubmodule(submodulePaths, filePath)
-    if (matchedSubmodule) {
-      // Why: validate the .gitmodules-derived path against the worktree boundary so a crafted one can't escape the repo.
-      const submoduleWorktreePath = resolveSubmoduleWorktreePath(worktreePath, matchedSubmodule)
-      const normalizedFilePath = filePath.replace(/\\/g, '/').replace(/\/+$/, '')
-      if (normalizedFilePath === matchedSubmodule) {
-        return notReusable(
-          await buildSubmodulePointerDiff(
-            worktreePath,
-            matchedSubmodule,
-            staged,
-            compareAgainstHead,
-            options,
-            submoduleWorktreePath
-          )
-        )
-      }
-      const innerPath = normalizedFilePath.slice(matchedSubmodule.length + 1)
-      const fromOid = staged
-        ? await readGitlinkOidFromTree(worktreePath, 'HEAD', matchedSubmodule, options)
-        : (await readGitlinkOidFromIndex(worktreePath, matchedSubmodule, options)) ||
-          (await readGitlinkOidFromTree(worktreePath, 'HEAD', matchedSubmodule, options))
-      const toOid = staged
-        ? await readGitlinkOidFromIndex(worktreePath, matchedSubmodule, options)
-        : await readWorkingSubmoduleHead(submoduleWorktreePath, options)
-      // Why: a moved gitlink with a clean submodule worktree means the change is committed — diff the two commits.
-      if (fromOid && toOid && fromOid !== toOid) {
-        return notReusable(
-          await buildSubmoduleInnerCommitRangeDiff(
-            submoduleWorktreePath,
-            innerPath,
-            fromOid,
-            toOid,
-            options
-          )
-        )
-      }
-      // The inner read stamps and caches against the submodule's own repo state.
-      return notReusable(
-        await getDiff(submoduleWorktreePath, innerPath, staged, compareAgainstHead, options)
-      )
+  const matchedSubmodule = findContainingSubmodule(submodulePaths, filePath)
+  if (matchedSubmodule) {
+    const snapshot = (await getStatus(worktreePath, { ...options, includeWorkspace: true, includeLineStats: false })).workspace
+    const module = snapshot?.submodules.find((item) => item.path === matchedSubmodule)
+    if (filePath === matchedSubmodule && snapshot?.rootContextId) {
+      return notReusable(await getDiff(worktreePath, filePath, staged, compareAgainstHead, options, {
+        contextId: snapshot.rootContextId,
+        left: { kind: staged || compareAgainstHead ? 'head' : 'index' },
+        right: { kind: staged ? 'index' : 'worktree' }
+      }))
     }
-  }
-
-  let originalContent = ''
-  let modifiedContent = ''
-  let originalIsBinary = false
-  let modifiedIsBinary = false
-  let modifiedDeleted = false
-  let readFailed = false
-
-  try {
-    if (staged) {
-      // Why concurrent: HEAD and the index are independent `git show` spawns.
-      // Only this branch qualifies — the unstaged left read chains index→HEAD.
-      const [leftBlob, rightBlob] = await Promise.all([
-        readGitBlobAtOidPath(worktreePath, 'HEAD', filePath, options),
-        readGitBlobAtIndexPath(worktreePath, filePath, options)
-      ])
-      originalContent = leftBlob.content
-      originalIsBinary = leftBlob.isBinary
-      modifiedContent = rightBlob.content
-      modifiedIsBinary = rightBlob.isBinary
-      modifiedDeleted = !rightBlob.exists && !rightBlob.failed
-      readFailed = leftBlob.failed === true || rightBlob.failed === true
-    } else {
-      // The left chain (index→HEAD) is sequential within itself, but the working
-      // tree read is a plain fs read that does not depend on it.
-      // Git can run in the distro against a raw Linux worktree path while Node reads it through Win32.
-      const hostWorktreePath = resolveWorktreeHostPath(worktreePath, options)
-      const [leftBlob, workingTreeBlob] = await Promise.all([
-        compareAgainstHead
-          ? readGitBlobAtOidPath(worktreePath, 'HEAD', filePath, options)
-          : readUnstagedLeftBlob(worktreePath, filePath, options),
-        hostWorktreePath
-          ? readWorkingTreeFile(path.join(hostWorktreePath, filePath))
-          : Promise.resolve(UNSPELLABLE_WORKING_TREE_READ)
-      ])
-      originalContent = leftBlob.content
-      originalIsBinary = leftBlob.isBinary
-      modifiedContent = workingTreeBlob.content
-      modifiedIsBinary = workingTreeBlob.isBinary
-      modifiedDeleted = !workingTreeBlob.exists
-      readFailed = leftBlob.failed === true || workingTreeBlob.failed === true
+    const child = snapshot?.repositories.find((item) => item.context.id === module?.contextId)
+    if (!child || !module) {
+      throw new Error('Access denied: submodule checkout is not authorized or available')
     }
-  } catch {
-    // Fallback
-    readFailed = true
+    await verifyWorkspaceContext(child.context, options)
+    const innerPath = filePath.slice(matchedSubmodule.length + 1)
+    const fromOid = staged || compareAgainstHead ? module.headOid : module.indexOid ?? module.headOid
+    const toOid = staged ? module.indexOid : module.currentOid
+    const result = fromOid && toOid && fromOid !== toOid
+      ? await getCommitDiff(child.context.checkoutPath, { filePath: innerPath, parentOid: fromOid, commitOid: toOid }, options)
+      : await getDiff(child.context.checkoutPath, innerPath, staged, compareAgainstHead, options)
+    await verifyWorkspaceContext(child.context, options)
+    return notReusable(result)
   }
 
-  const result = buildDiffResult(
-    originalContent,
-    modifiedContent,
-    originalIsBinary,
-    modifiedIsBinary,
-    filePath
-  )
-  // Why: mark a proven deletion so previewers don't mistake a read failure's empty side for one.
-  if (result.kind === 'binary' && modifiedDeleted) {
-    return { result: { ...result, modifiedDeleted: true }, reusable: !readFailed }
-  }
-  return { result, reusable: !readFailed }
+  const status = await getStatus(worktreePath, { ...options, includeLineStats: false })
+  const entry = status.entries.find((entry) => entry.path === filePath && entry.area === (staged ? 'staged' : 'unstaged'))
+  const result = await readFileDiffDocument(worktreePath, filePath, {
+    oldPath: staged ? entry?.oldPath : undefined,
+    left: { kind: staged || compareAgainstHead ? 'head' : 'index' },
+    right: { kind: staged ? 'index' : 'worktree' }
+  }, options)
+  return { result, reusable: !result.document?.stale }
 }
 
-/** A worktree path with no host spelling is a read failure, never a proven deletion. */
-const UNSPELLABLE_WORKING_TREE_READ: GitBlobReadResult = {
-  content: '',
-  isBinary: false,
-  exists: true,
-  failed: true
-}
 
 function notReusable(result: GitDiffResult): LoadedDiff {
   return { result, reusable: false }

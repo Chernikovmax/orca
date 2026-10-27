@@ -24,9 +24,14 @@ export class RuntimeGitStatusCommands {
   ): Promise<GitStatusResult> {
     const target = await this.host.resolveRuntimeGitTarget(worktreeSelector)
     const provider = requireRuntimeGitProvider(target)
-    return options
-      ? provider.getStatus(target.worktree.path, options)
-      : provider.getStatus(target.worktree.path)
+    return options?.includeWorkspace
+      ? provider.getStatus(target.worktree.path, {
+          ...options,
+          executionHostId: target.executionHostId
+        })
+      : options
+        ? provider.getStatus(target.worktree.path, options)
+        : provider.getStatus(target.worktree.path)
   }
 
   async getRuntimeGitSubmoduleStatus(

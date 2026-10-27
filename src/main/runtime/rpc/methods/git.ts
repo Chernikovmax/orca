@@ -21,6 +21,8 @@ import {
   GitTargetedRemote,
   WorktreeSelector
 } from '../../../../shared/rpc-contract/git-params'
+import { GIT_PROGRESS_METHODS } from './git-progress-methods'
+import { GitMutate } from '../../../../shared/rpc-contract/git-mutation-params'
 
 export const GIT_METHODS = [
   defineMethod({
@@ -30,6 +32,8 @@ export const GIT_METHODS = [
     handler: async (params, { runtime, signal }) => {
       const options =
         params.includeIgnored === undefined &&
+        params.includeWorkspace === undefined &&
+        params.workspaceRefsContextId === undefined &&
         params.includeLineStats === undefined &&
         params.bypassEffectiveUpstreamNegativeCache === undefined &&
         params.reuseLineStats === undefined &&
@@ -38,6 +42,10 @@ export const GIT_METHODS = [
         signal === undefined
           ? undefined
           : {
+              ...(params.includeWorkspace === true ? { includeWorkspace: true } : {}),
+              ...(params.workspaceRefsContextId
+                ? { workspaceRefsContextId: params.workspaceRefsContextId }
+                : {}),
               ...(params.includeIgnored === undefined
                 ? {}
                 : { includeIgnored: params.includeIgnored }),
@@ -80,7 +88,12 @@ export const GIT_METHODS = [
     handler: async (params, { runtime }) =>
       runtime.getRuntimeGitHistory(params.worktree, {
         limit: params.limit,
-        baseRef: params.baseRef
+        baseRef: params.baseRef,
+        contextId: params.contextId,
+        revision: params.revision,
+        cursor: params.cursor,
+        path: params.path,
+        message: params.message
       })
   }),
   defineMethod({
@@ -133,7 +146,10 @@ export const GIT_METHODS = [
     permission: 'workspace',
     params: GitCommitCompare,
     handler: async (params, { runtime }) =>
-      runtime.getRuntimeGitCommitCompare(params.worktree, params.commitId)
+      runtime.getRuntimeGitCommitCompare(params.worktree, params.commitId, {
+        contextId: params.contextId,
+        baseOid: params.baseOid
+      })
   }),
   defineMethod({
     name: 'git.upstreamStatus',
@@ -204,6 +220,16 @@ export const GIT_METHODS = [
     handler: async (params, { runtime }) =>
       runtime.commitRuntimeGit(params.worktree, params.message)
   }),
+  defineMethod({
+    name: 'git.mutate',
+    permission: 'workspace',
+    params: GitMutate,
+    handler: async (params, { runtime, signal }) => {
+      const { worktree, ...request } = params
+      return runtime.mutateRuntimeGitWorkspace(worktree, request, signal)
+    }
+  }),
+  ...GIT_PROGRESS_METHODS,
   ...GIT_COMMIT_MESSAGE_GENERATION_METHODS,
   defineMethod({
     name: 'git.stage',

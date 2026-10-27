@@ -32,7 +32,10 @@ export function createOpenUnstagedDiff(
           options?.runtimeEnvironmentId
         )
         const diffSource: DiffSource = staged ? 'staged' : 'unstaged'
-        const id = buildDiffEditorFileId(worktreeId, diffSource, relativePath, runtimeEnvironmentId)
+        const baseId = buildDiffEditorFileId(worktreeId, diffSource, relativePath, runtimeEnvironmentId)
+        const id = options?.gitDiffSelection?.contextId
+          ? `${baseId}::context:${options.gitDiffSelection.contextId}::${JSON.stringify(options.gitDiffSelection)}`
+          : baseId
         editorItemFileId = id
         const targetGroupId =
           resolveEditorOpenTargetGroupId(s, worktreeId, options?.targetGroupId) ?? undefined
@@ -45,6 +48,8 @@ export function createOpenUnstagedDiff(
             ...existing,
             mode: 'diff' as const,
             diffSource,
+            gitDiffSelection: options?.gitDiffSelection,
+            gitDiffRootPath: options?.gitDiffRootPath,
             conflict: undefined,
             skippedConflicts: undefined,
             conflictReview: undefined,
@@ -65,6 +70,8 @@ export function createOpenUnstagedDiff(
           isDirty: false,
           mode: 'diff',
           diffSource,
+          gitDiffSelection: options?.gitDiffSelection,
+          gitDiffRootPath: options?.gitDiffRootPath,
           conflict: undefined,
           skippedConflicts: undefined,
           conflictReview: undefined,

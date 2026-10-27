@@ -22,7 +22,10 @@ function historyResult(subject: string): GitHistoryResult {
     hasIncomingChanges: false,
     hasOutgoingChanges: false,
     hasMore: false,
-    limit: 50
+    limit: 50,
+    generation: `gen-${subject}`,
+    tipOid: subject,
+    empty: false
   }
 }
 

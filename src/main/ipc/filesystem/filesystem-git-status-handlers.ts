@@ -1,3 +1,5 @@
+import { GitDiffSelection } from '../../../shared/rpc-contract/git-params'
+import type { GitDiffSelection as DiffSelection } from '../../../shared/git-diff-document'
 import { ipcMain } from 'electron'
 import type {
   GitConflictOperation,
@@ -48,6 +50,8 @@ export function registerFilesystemGitStatusHandlers(context: FilesystemHandlerCo
         connectionId?: string
         admissionTier?: GitAdmissionTier
         includeIgnored?: boolean
+        includeWorkspace?: boolean
+        workspaceRefsContextId?: string
         includeLineStats?: boolean
         bypassEffectiveUpstreamNegativeCache?: boolean
         reuseLineStats?: boolean
@@ -58,6 +62,13 @@ export function registerFilesystemGitStatusHandlers(context: FilesystemHandlerCo
       const controller = gitStatusCancellations.begin(event, args.requestToken)
       const options = {
         includeIgnored: args.includeIgnored ?? false,
+        ...(args.includeWorkspace === true
+          ? {
+              includeWorkspace: true,
+              workspaceRefsContextId: args.workspaceRefsContextId,
+              executionHostId: getConnectionExecutionHostId(args.connectionId)
+            }
+          : {}),
         admissionTier: args.admissionTier ?? ('status' as const),
         ...(args.includeLineStats === false ? { includeLineStats: false } : {}),
         ...(args.reuseLineStats === true ? { reuseLineStats: true } : {}),
@@ -170,7 +181,6 @@ export function registerFilesystemGitStatusHandlers(context: FilesystemHandlerCo
       _event,
       args: { worktreePath: string; connectionId?: string } & GitHistoryOptions
     ): Promise<GitHistoryResult> => {
-      const options: GitHistoryOptions = { limit: args.limit, baseRef: args.baseRef }
       requireReachableGitRoute(getConnectionExecutionHostId(args.connectionId))
       const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
       const gitOptions = getLocalGitOptionsForRegisteredWorktree(
@@ -178,7 +188,16 @@ export function registerFilesystemGitStatusHandlers(context: FilesystemHandlerCo
         args.worktreePath,
         worktreePath
       )
-      return getHistory(worktreePath, { ...options, ...gitOptions })
+      return getHistory(worktreePath, {
+        ...gitOptions,
+        limit: args.limit,
+        baseRef: args.baseRef,
+        contextId: args.contextId,
+        revision: args.revision,
+        cursor: args.cursor,
+        path: args.path,
+        message: args.message
+      })
     }
   )
 
@@ -255,6 +274,7 @@ export function registerFilesystemGitStatusHandlers(context: FilesystemHandlerCo
         staged: boolean
         compareAgainstHead?: boolean
         connectionId?: string
+        selection?: DiffSelection
       }
     ): Promise<GitDiffResult> => {
       requireReachableGitRoute(getConnectionExecutionHostId(args.connectionId))
@@ -268,7 +288,7 @@ export function registerFilesystemGitStatusHandlers(context: FilesystemHandlerCo
       return getDiff(worktreePath, filePath, args.staged, args.compareAgainstHead, {
         ...gitOptions,
         admissionTier: 'interactive'
-      })
+      }, args.selection ? GitDiffSelection.parse(args.selection) : undefined)
     }
   )
 }

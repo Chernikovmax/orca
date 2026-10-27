@@ -22,7 +22,8 @@ export const GIT_DIFF_METHODS = [
         params.filePath,
         params.staged,
         params.compareAgainstHead,
-        remoteDiffContentBudget(clientKind, requestId)
+        remoteDiffContentBudget(clientKind, requestId),
+        params.selection
       )
   }),
   defineMethod({

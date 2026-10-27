@@ -111,7 +111,10 @@ export function createOpenHistoryDiff(
 
     openCommitDiff: (worktreeId, worktreePath, entry, compare, language, options) => {
       const commitCompare = toCommitCompareSnapshot(compare)
-      const id = `${worktreeId}::diff::commit::${commitCompare.compareVersion}::${entry.path}`
+      const contextSuffix = options?.gitDiffSelection?.contextId
+        ? `::context:${options.gitDiffSelection.contextId}`
+        : ''
+      const id = `${worktreeId}::diff::commit::${commitCompare.compareVersion}::${entry.path}${contextSuffix}`
       const isPreview = resolveEditorPreviewIntent(get(), options?.preview)
       let editorItemTargetGroupId = options?.targetGroupId
       set((s) => {
@@ -131,6 +134,8 @@ export function createOpenHistoryDiff(
             mode: 'diff' as const,
             diffSource: 'commit' as const,
             commitCompare,
+            gitDiffSelection: options?.gitDiffSelection,
+            gitDiffRootPath: options?.gitDiffRootPath,
             branchOldPath: entry.oldPath,
             conflict: undefined,
             skippedConflicts: undefined,
@@ -156,6 +161,8 @@ export function createOpenHistoryDiff(
           mode: 'diff',
           diffSource: 'commit',
           commitCompare,
+          gitDiffSelection: options?.gitDiffSelection,
+          gitDiffRootPath: options?.gitDiffRootPath,
           branchOldPath: entry.oldPath,
           conflict: undefined,
           skippedConflicts: undefined,

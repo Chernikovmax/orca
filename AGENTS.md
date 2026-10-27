@@ -1,3 +1,10 @@
+# Codebase Memory Indexing
+
+- Run at most one `codebase-memory-mcp` indexing job for this project across all sessions, agents, and MCP instances.
+- Before calling `index_repository`, check existing index status and active `--index-worker index_repository` processes for this project's canonical `repo_path`. Reuse the existing index or wait for its active job; never start indexing from parallel agents.
+- A client timeout or disconnected response does not prove the worker stopped. Verify completion before retrying; if another running job cannot be ruled out, do not launch one.
+- During memory pressure or active swapping, defer indexing and use file reads and targeted search.
+
 # Useful Commands
 
 - **Typecheck**: `pnpm tc` (or `tc:node` / `tc:cli` / `tc:web`)

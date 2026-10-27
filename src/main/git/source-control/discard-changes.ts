@@ -11,6 +11,7 @@ import { invalidateGitReadCaches } from './git-read-cache-invalidation'
 import { bulkPathspecCommands, literalPathspec } from './git-pathspec'
 import { encodeGitPathspecs } from '../../../shared/git-pathspec-stdin'
 import { redoWriteForDriveCheckoutSuspects } from './drive-checkout-suspect-writes'
+import { withGitMutationQueue } from './git-mutation-queue'
 
 const DISCARD_WRITE = ['restore', '--worktree'] as const
 
@@ -22,44 +23,46 @@ export async function discardChanges(
   filePath: string,
   options: GitRuntimeOptions = {}
 ): Promise<void> {
-  invalidateGitReadCaches()
-  const resolvedWorktree = path.resolve(worktreePath)
-  const resolvedTarget = path.resolve(worktreePath, filePath)
-  try {
-    if (!isWithinWorktree(path, resolvedWorktree, resolvedTarget)) {
-      throw new Error(`Path "${filePath}" resolves outside the worktree`)
-    }
-
-    let tracked = false
-    try {
-      await gitExecFileAsync(
-        ['ls-files', '--error-unmatch', '--', literalPathspec(filePath, worktreePath, options)],
-        {
-          ...gitOptionsForWorktree(worktreePath, options)
-        }
-      )
-      tracked = true
-    } catch {
-      // File is not tracked by git
-    }
-
-    if (tracked) {
-      await gitExecFileAsync(
-        ['restore', '--worktree', '--', literalPathspec(filePath, worktreePath, options)],
-        {
-          ...gitOptionsForWorktree(worktreePath, options)
-        }
-      )
-      await redoWriteForDriveCheckoutSuspects(worktreePath, [filePath], DISCARD_WRITE, options)
-      return
-    }
-
-    await removeSafeUntrackedDiscardTarget(worktreePath, filePath, (targetPath) =>
-      cleanUntrackedPaths(worktreePath, [targetPath], options)
-    )
-  } finally {
+  await withGitMutationQueue(worktreePath, options, async () => {
     invalidateGitReadCaches()
-  }
+    const resolvedWorktree = path.resolve(worktreePath)
+    const resolvedTarget = path.resolve(worktreePath, filePath)
+    try {
+      if (!isWithinWorktree(path, resolvedWorktree, resolvedTarget)) {
+        throw new Error(`Path "${filePath}" resolves outside the worktree`)
+      }
+
+      let tracked = false
+      try {
+        await gitExecFileAsync(
+          ['ls-files', '--error-unmatch', '--', literalPathspec(filePath, worktreePath, options)],
+          {
+            ...gitOptionsForWorktree(worktreePath, options)
+          }
+        )
+        tracked = true
+      } catch {
+        // File is not tracked by git
+      }
+
+      if (tracked) {
+        await gitExecFileAsync(
+          ['restore', '--worktree', '--', literalPathspec(filePath, worktreePath, options)],
+          {
+            ...gitOptionsForWorktree(worktreePath, options)
+          }
+        )
+        await redoWriteForDriveCheckoutSuspects(worktreePath, [filePath], DISCARD_WRITE, options)
+        return
+      }
+
+      await removeSafeUntrackedDiscardTarget(worktreePath, filePath, (targetPath) =>
+        cleanUntrackedPaths(worktreePath, [targetPath], options)
+      )
+    } finally {
+      invalidateGitReadCaches()
+    }
+  })
 }
 
 async function listTrackedPathSpecs(
@@ -108,45 +111,46 @@ export async function bulkDiscardChanges(
   filePaths: string[],
   options: GitRuntimeOptions = {}
 ): Promise<void> {
-  invalidateGitReadCaches()
   if (filePaths.length === 0) {
     return
   }
-
-  try {
-    const resolvedWorktree = path.resolve(worktreePath)
-    for (const filePath of filePaths) {
-      const resolvedTarget = path.resolve(worktreePath, filePath)
-      if (!isWithinWorktree(path, resolvedWorktree, resolvedTarget)) {
-        throw new Error(`Path "${filePath}" resolves outside the worktree`)
-      }
-    }
-
-    const trackedPathSpecs = await listTrackedPathSpecs(worktreePath, filePaths, options)
-    const { trackedPaths, untrackedPaths } = partitionTrackedPathSpecs(filePaths, trackedPathSpecs)
-    await removeSafeUntrackedDiscardTargets(
-      worktreePath,
-      untrackedPaths,
-      (targetPaths) => cleanUntrackedPaths(worktreePath, targetPaths, options),
-      async () => {
-        if (trackedPaths.length === 0) {
-          return
-        }
-        await gitExecFileAsync(
-          ['restore', '--worktree', '--pathspec-from-file=-', '--pathspec-file-nul'],
-          {
-            ...gitOptionsForWorktree(worktreePath, options),
-            stdin: encodeGitPathspecs(
-              trackedPaths.map((filePath) => literalPathspec(filePath, worktreePath, options))
-            )
-          }
-        )
-        await redoWriteForDriveCheckoutSuspects(worktreePath, trackedPaths, DISCARD_WRITE, options)
-      }
-    )
-  } finally {
+  await withGitMutationQueue(worktreePath, options, async () => {
     invalidateGitReadCaches()
-  }
+    try {
+      const resolvedWorktree = path.resolve(worktreePath)
+      for (const filePath of filePaths) {
+        const resolvedTarget = path.resolve(worktreePath, filePath)
+        if (!isWithinWorktree(path, resolvedWorktree, resolvedTarget)) {
+          throw new Error(`Path "${filePath}" resolves outside the worktree`)
+        }
+      }
+
+      const trackedPathSpecs = await listTrackedPathSpecs(worktreePath, filePaths, options)
+      const { trackedPaths, untrackedPaths } = partitionTrackedPathSpecs(filePaths, trackedPathSpecs)
+      await removeSafeUntrackedDiscardTargets(
+        worktreePath,
+        untrackedPaths,
+        (targetPaths) => cleanUntrackedPaths(worktreePath, targetPaths, options),
+        async () => {
+          if (trackedPaths.length === 0) {
+            return
+          }
+          await gitExecFileAsync(
+            ['restore', '--worktree', '--pathspec-from-file=-', '--pathspec-file-nul'],
+            {
+              ...gitOptionsForWorktree(worktreePath, options),
+              stdin: encodeGitPathspecs(
+                trackedPaths.map((filePath) => literalPathspec(filePath, worktreePath, options))
+              )
+            }
+          )
+          await redoWriteForDriveCheckoutSuspects(worktreePath, trackedPaths, DISCARD_WRITE, options)
+        }
+      )
+    } finally {
+      invalidateGitReadCaches()
+    }
+  })
 }
 
 export function isWithinWorktree(

@@ -1,3 +1,8 @@
+import type { GitDiffSelection } from '../../shared/git-diff-document'
+import type {
+  GitMutationReceipt,
+  GitWorkspaceMutationRequest
+} from '../../shared/git-workspace-mutation'
 import { ipcRenderer } from 'electron'
 import type { GitForkSyncExpectedUpstream, GitForkSyncResult } from '../../shared/git-fork-sync'
 import type { GitStagingArea, GitUpstreamStatus } from '../../shared/git-status-types'
@@ -57,12 +62,18 @@ export const gitApi = {
     filePath: string
     staged: boolean
     compareAgainstHead?: boolean
+    selection?: GitDiffSelection
     connectionId?: string
   }) => ipcRenderer.invoke('git:diff', args),
   branchCompare: (args: { worktreePath: string; baseRef: string; connectionId?: string }) =>
     ipcRenderer.invoke('git:branchCompare', args),
-  commitCompare: (args: { worktreePath: string; commitId: string; connectionId?: string }) =>
-    ipcRenderer.invoke('git:commitCompare', args),
+  commitCompare: (args: {
+    worktreePath: string
+    commitId: string
+    contextId?: string
+    baseOid?: string | null
+    connectionId?: string
+  }) => ipcRenderer.invoke('git:commitCompare', args),
   upstreamStatus: (args: {
     worktreePath: string
     connectionId?: string
@@ -163,6 +174,11 @@ export const gitApi = {
   }): Promise<void> => ipcRenderer.invoke('git:cancelGeneratePullRequestFields', args),
   stage: (args: { worktreePath: string; filePath: string; connectionId?: string }): Promise<void> =>
     ipcRenderer.invoke('git:stage', args),
+  mutate: (args: {
+    worktreePath: string
+    connectionId?: string
+  } & GitWorkspaceMutationRequest): Promise<GitMutationReceipt> =>
+    ipcRenderer.invoke('git:mutate', args),
   bulkStage: (args: {
     worktreePath: string
     filePaths: string[]

@@ -1,3 +1,4 @@
+import type { GitDiffSelection } from '../../shared/git-diff-document'
 import type {
   GitBranchCompareResult,
   GitCommitCompareResult,
@@ -24,7 +25,8 @@ export class RuntimeGitDiffCommands {
     filePath: string,
     staged: boolean,
     compareAgainstHead?: boolean,
-    maxContentBytes?: number
+    maxContentBytes?: number,
+    selection?: GitDiffSelection
   ): Promise<GitDiffResult> {
     const target = await this.host.resolveRuntimeGitTarget(worktreeSelector)
     const relativePath = normalizeRuntimeGitRelativePath(filePath)
@@ -33,7 +35,8 @@ export class RuntimeGitDiffCommands {
         target.worktree.path,
         relativePath,
         staged,
-        compareAgainstHead
+        compareAgainstHead,
+        selection
       ),
       maxContentBytes
     )
@@ -52,10 +55,15 @@ export class RuntimeGitDiffCommands {
 
   async getRuntimeGitCommitCompare(
     worktreeSelector: string,
-    commitId: string
+    commitId: string,
+    options?: { contextId?: string; baseOid?: string }
   ): Promise<GitCommitCompareResult> {
     const target = await this.host.resolveRuntimeGitTarget(worktreeSelector)
-    return requireRuntimeGitProvider(target).getCommitCompare(target.worktree.path, commitId)
+    return requireRuntimeGitProvider(target).getCommitCompare(
+      target.worktree.path,
+      commitId,
+      options
+    )
   }
 
   async getRuntimeGitBranchDiff(

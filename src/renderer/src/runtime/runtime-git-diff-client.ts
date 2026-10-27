@@ -1,3 +1,4 @@
+import type { GitDiffSelection } from '../../../shared/git-diff-document'
 import type {
   GitBranchCompareResult,
   GitCommitCompareResult,
@@ -9,24 +10,28 @@ import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
 
 export async function getRuntimeGitDiff(
   context: RuntimeGitContext,
-  args: { filePath: string; staged: boolean; compareAgainstHead?: boolean }
+  args: { filePath: string; staged: boolean; compareAgainstHead?: boolean; selection?: GitDiffSelection }
 ): Promise<GitDiffResult> {
   const target = context.target
-  if (target.kind === 'local' || !context.worktreeId) {
-    return window.api.git.diff({
-      worktreePath: resolveLocalWorktreePath(context),
-      filePath: args.filePath,
-      staged: args.staged,
-      compareAgainstHead: args.compareAgainstHead,
-      connectionId: context.connectionId
-    })
+  const result = target.kind === 'local' || !context.worktreeId
+    ? await window.api.git.diff({
+        worktreePath: resolveLocalWorktreePath(context),
+        filePath: args.filePath,
+        staged: args.staged,
+        compareAgainstHead: args.compareAgainstHead,
+        selection: args.selection,
+        connectionId: context.connectionId
+      })
+    : await callRuntimeRpc<GitDiffResult>(
+        target,
+        'git.diff',
+        { worktree: toRuntimeWorktreeSelector(context.worktreeId), ...args },
+        { timeoutMs: 15_000 }
+      )
+  if (args.selection?.contextId && result.document?.contextId !== args.selection.contextId) {
+    throw new Error('Execution host did not return the requested Git context; update the host before opening this diff.')
   }
-  return callRuntimeRpc<GitDiffResult>(
-    target,
-    'git.diff',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId), ...args },
-    { timeoutMs: 15_000 }
-  )
+  return result
 }
 
 export async function getRuntimeGitBranchCompare(
@@ -57,20 +62,28 @@ export async function getRuntimeGitBranchCompare(
 
 export async function getRuntimeGitCommitCompare(
   context: RuntimeGitContext,
-  commitId: string
+  commitId: string,
+  options: { contextId?: string; baseOid?: string | null } = {}
 ): Promise<GitCommitCompareResult> {
   const target = context.target
   if (target.kind === 'local' || !context.worktreeId) {
     return window.api.git.commitCompare({
       worktreePath: resolveLocalWorktreePath(context),
       commitId,
+      contextId: options.contextId,
+      baseOid: options.baseOid,
       connectionId: context.connectionId
     })
   }
   return callRuntimeRpc<GitCommitCompareResult>(
     target,
     'git.commitCompare',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId), commitId },
+    {
+      worktree: toRuntimeWorktreeSelector(context.worktreeId),
+      commitId,
+      contextId: options.contextId,
+      baseOid: options.baseOid
+    },
     { timeoutMs: 15_000 }
   )
 }

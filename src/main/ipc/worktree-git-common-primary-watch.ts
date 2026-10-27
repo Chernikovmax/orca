@@ -1,3 +1,4 @@
+import { onGitWorkspaceWatchPathsChanged } from '../git/source-control/git-workspace-watch-paths'
 import { join } from 'node:path'
 import { subscribeViaWatcherProcess } from './parcel-watcher-process'
 import type { WatcherProcessSubscription } from './parcel-watcher-process-subscription'
@@ -131,6 +132,9 @@ export async function startGitCommonPrimaryWatch(
   const unsubscribeBindingChanges = onActiveGitStatusRefBindingChanged(() => {
     void syncStatusRefPolling().catch(() => {})
   })
+  const unsubscribeWorkspaceChanges = onGitWorkspaceWatchPathsChanged(() => {
+    void syncStatusRefPolling().catch(() => {})
+  })
 
   const stopWatcherSidePolling = async (): Promise<void> => {
     statusRefGeneration++
@@ -226,6 +230,7 @@ export async function startGitCommonPrimaryWatch(
     unsubscribe: async () => {
       disposed = true
       unsubscribeBindingChanges()
+      unsubscribeWorkspaceChanges()
       const current = watcher
       watcher = null
       if (current) {

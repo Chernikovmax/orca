@@ -1,5 +1,9 @@
 // Kept separate so the central cross-provider contract stays within its enforced size limit.
 export type GitProviderStatusOptions = {
+  includeWorkspace?: boolean
+  workspaceRefsContextId?: string
+  /** Host route authority; not a renderer/RPC parameter. */
+  executionHostId?: string
   admissionTier?: 'interactive' | 'status' | 'background'
   includeIgnored?: boolean
   includeLineStats?: boolean

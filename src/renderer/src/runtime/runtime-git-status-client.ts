@@ -13,6 +13,8 @@ export async function getRuntimeGitStatus(
   context: RuntimeGitContext,
   options?: {
     admissionTier?: 'interactive' | 'status' | 'background'
+    includeWorkspace?: boolean
+    workspaceRefsContextId?: string
     includeIgnored?: boolean
     includeLineStats?: boolean
     bypassEffectiveUpstreamNegativeCache?: boolean
@@ -23,6 +25,9 @@ export async function getRuntimeGitStatus(
 ): Promise<GitStatusResult> {
   const target = context.target
   const includeIgnoredArgs = options?.includeIgnored ? { includeIgnored: true } : {}
+  const workspaceArgs = options?.includeWorkspace
+    ? { includeWorkspace: true, workspaceRefsContextId: options.workspaceRefsContextId }
+    : {}
   const admissionTierArgs = options?.admissionTier ? { admissionTier: options.admissionTier } : {}
   const includeLineStatsArgs =
     options?.includeLineStats === false ? { includeLineStats: false } : {}
@@ -40,6 +45,7 @@ export async function getRuntimeGitStatus(
         connectionId: context.connectionId,
         ...admissionTierArgs,
         ...includeIgnoredArgs,
+        ...workspaceArgs,
         ...includeLineStatsArgs,
         ...upstreamCacheBypassArgs,
         ...lineStatsReuseArgs,
@@ -55,13 +61,14 @@ export async function getRuntimeGitStatus(
       worktree: toRuntimeWorktreeSelector(context.worktreeId),
       ...admissionTierArgs,
       ...includeIgnoredArgs,
+      ...workspaceArgs,
       ...includeLineStatsArgs,
       ...upstreamCacheBypassArgs,
       ...lineStatsReuseArgs,
       ...branchLineTotalArgs
     },
     {
-      timeoutMs: 15_000,
+      timeoutMs: options?.includeWorkspace ? 120_000 : 15_000,
       // Why: idle safety refreshes stay pooled; activity refreshes need cancellation.
       ...(options?.reuseLineStats ? {} : { signal: options?.signal })
     }

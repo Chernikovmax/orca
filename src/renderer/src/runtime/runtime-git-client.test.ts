@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   bulkDiscardRuntimeGitPaths,
-  bulkStageRuntimeGitPaths
+  bulkStageRuntimeGitPaths,
+  mutateRuntimeGitWorkspace
 } from './runtime-git-working-tree-client'
 import {
   cancelRuntimeGenerateCommitMessage,
@@ -40,6 +41,7 @@ const gitHistory = vi.fn()
 const gitBulkStage = vi.fn()
 const gitBulkDiscard = vi.fn()
 const gitCommit = vi.fn()
+const gitMutate = vi.fn()
 const gitFetch = vi.fn()
 const gitFastForward = vi.fn()
 const gitPush = vi.fn()
@@ -65,6 +67,7 @@ beforeEach(() => {
   gitBulkStage.mockReset()
   gitBulkDiscard.mockReset()
   gitCommit.mockReset()
+  gitMutate.mockReset()
   gitFetch.mockReset()
   gitFastForward.mockReset()
   gitPush.mockReset()
@@ -92,6 +95,7 @@ beforeEach(() => {
         bulkStage: gitBulkStage,
         bulkDiscard: gitBulkDiscard,
         commit: gitCommit,
+        mutate: gitMutate,
         fetch: gitFetch,
         fastForward: gitFastForward,
         push: gitPush,
@@ -654,9 +658,9 @@ describe('runtime git client', () => {
     })
     expect(runtimeEnvironmentCall).toHaveBeenNthCalledWith(3, {
       selector: 'env-1',
-      method: 'git.commit',
-      params: { worktree: 'id:wt-1', message: 'feat: test' },
-      timeoutMs: 30_000
+      method: 'git.mutate',
+      params: { worktree: 'id:wt-1', action: 'commit', message: 'feat: test' },
+      timeoutMs: 60_000
     })
     expect(runtimeEnvironmentCall).toHaveBeenNthCalledWith(4, {
       selector: 'env-1',
@@ -862,5 +866,96 @@ describe('runtime git client', () => {
     await generateRuntimeCommitMessage(context)
 
     expect(gitGenerateCommitMessage.mock.calls[0][0]).not.toHaveProperty('worktreeId')
+  })
+})
+
+describe('workspace mutation client', () => {
+  const receipt = {
+    action: 'stage' as const,
+    outcome: 'succeeded' as const,
+    contextId: 'ctx-1',
+    expectedState: 'state-2'
+  }
+
+  it('forwards host-issued ids to the local host and returns its receipt', async () => {
+    gitMutate.mockResolvedValue(receipt)
+    const context = {
+      target: { kind: 'local' as const },
+      worktreeId: 'wt-1',
+      worktreePath: '/repo'
+    }
+
+    const result = await mutateRuntimeGitWorkspace(context, {
+      action: 'stage',
+      contextId: 'ctx-1',
+      expectedState: 'state-1',
+      filePath: 'a.ts',
+      documentId: 'doc-1',
+      lineIds: ['doc-1:l0']
+    })
+
+    expect(gitMutate).toHaveBeenCalledWith({
+      worktreePath: '/repo',
+      connectionId: undefined,
+      action: 'stage',
+      contextId: 'ctx-1',
+      expectedState: 'state-1',
+      filePath: 'a.ts',
+      documentId: 'doc-1',
+      lineIds: ['doc-1:l0']
+    })
+    expect(result).toEqual(receipt)
+  })
+
+  it('routes a runtime host mutation through git.mutate', async () => {
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-mutate',
+      ok: true,
+      result: receipt,
+      _meta: { runtimeId: 'remote-runtime' }
+    })
+    const context = {
+      target: { kind: 'environment' as const, environmentId: 'env-1' },
+      worktreeId: 'wt-1',
+      worktreePath: '/repo'
+    }
+
+    const result = await mutateRuntimeGitWorkspace(context, {
+      action: 'previewCommit',
+      contextId: 'ctx-1',
+      expectedState: 'state-1'
+    })
+
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'git.mutate',
+      params: {
+        worktree: 'id:wt-1',
+        action: 'previewCommit',
+        contextId: 'ctx-1',
+        expectedState: 'state-1'
+      },
+      timeoutMs: 60_000
+    })
+    expect(result).toEqual(receipt)
+  })
+
+  it('reports a dropped mutation request as unknown without retrying', async () => {
+    runtimeEnvironmentCall.mockRejectedValue(new Error('runtime request timed out'))
+    const context = {
+      target: { kind: 'environment' as const, environmentId: 'env-1' },
+      worktreeId: 'wt-1',
+      worktreePath: '/repo'
+    }
+
+    const result = await mutateRuntimeGitWorkspace(context, {
+      action: 'commit',
+      message: 'feat: x'
+    })
+
+    expect(result.outcome).toBe('unknown')
+    expect(result.errorCategory).toBe('unknown-outcome')
+    expect(result.error).toContain('nothing was retried automatically')
+    expect(runtimeEnvironmentCall).toHaveBeenCalledTimes(1)
   })
 })

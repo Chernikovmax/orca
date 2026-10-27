@@ -1,3 +1,4 @@
+import { getGitWorkspaceWatchPaths } from '../git/source-control/git-workspace-watch-paths'
 import type { BrowserWindow } from 'electron'
 import type { Store } from '../persistence'
 import {
@@ -90,7 +91,7 @@ async function subscribeTarget(
       visibility: createWorktreePollerWindowVisibility(
         () => (activeWatches.get(target.key) ?? activeWatch)?.mainWindow ?? null
       ),
-      getGitStatusRefPaths: () => [...gitStatusRefPaths],
+      getGitStatusRefPaths: () => [...gitStatusRefPaths, ...getGitWorkspaceWatchPaths(target.path)],
       onWatchError: (error) => {
         const currentWatch = activeWatches.get(target.key) ?? activeWatch
         if (currentWatch && !currentWatch.disposed) {

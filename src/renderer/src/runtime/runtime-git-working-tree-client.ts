@@ -2,28 +2,89 @@ import {
   requireGitStageWorktreeScopeReceipt,
   type GitStageWorktreeScope
 } from '../../../shared/git-stage-worktree-scope'
+import {
+  GIT_MUTATION_TIMEOUT_MS,
+  type GitMutationReceipt,
+  type GitWorkspaceMutationRequest
+} from '../../../shared/git-workspace-mutation'
 import { resolveLocalWorktreePath, type RuntimeGitContext } from './runtime-git-client-context'
 import { callRuntimeRpc } from './runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
+
+const TRANSPORT_UNKNOWN =
+  /timed out|timeout|abort|disconnect|socket|ECONN|ENOTFOUND|network|closed|not connected|pipe/i
+
+/**
+ * A dropped request may already have run on the host. Report `unknown` instead of
+ * throwing, so the UI verifies the real state and never retries automatically.
+ */
+function asUnknownOutcome(
+  request: GitWorkspaceMutationRequest,
+  error: unknown
+): GitMutationReceipt | undefined {
+  const message = error instanceof Error ? error.message : String(error)
+  if (
+    !TRANSPORT_UNKNOWN.test(message) &&
+    !(error instanceof Error && error.name === 'AbortError')
+  ) {
+    return undefined
+  }
+  return {
+    action: request.action,
+    outcome: 'unknown',
+    ...(request.contextId ? { contextId: request.contextId } : {}),
+    error: `${message}\nThe outcome is unknown. Verify the real Git state before retrying; nothing was retried automatically.`,
+    errorCategory: 'unknown-outcome'
+  }
+}
+
+/** One host-authorized write for the workspace UI; ids and state fences come from the host. */
+export async function mutateRuntimeGitWorkspace(
+  context: RuntimeGitContext,
+  request: GitWorkspaceMutationRequest,
+  options: { signal?: AbortSignal; timeoutMs?: number } = {}
+): Promise<GitMutationReceipt> {
+  const target = context.target
+  const worktreePath = resolveLocalWorktreePath(context)
+  try {
+    if (target.kind === 'local' || !context.worktreeId) {
+      return await window.api.git.mutate({
+        worktreePath,
+        connectionId: context.connectionId,
+        ...request
+      })
+    }
+    return await callRuntimeRpc<GitMutationReceipt>(
+      target,
+      'git.mutate',
+      { worktree: toRuntimeWorktreeSelector(context.worktreeId), ...request },
+      {
+        timeoutMs: options.timeoutMs ?? GIT_MUTATION_TIMEOUT_MS[request.action] ?? 60_000,
+        ...(options.signal ? { signal: options.signal } : {})
+      }
+    )
+  } catch (error) {
+    const unknown = asUnknownOutcome(request, error)
+    if (unknown) {
+      return unknown
+    }
+    throw error
+  }
+}
+
+function requireSucceeded(receipt: GitMutationReceipt, fallback: string): void {
+  if (receipt.outcome !== 'succeeded') {
+    throw new Error(receipt.error ?? fallback)
+  }
+}
 
 export async function stageRuntimeGitPath(
   context: RuntimeGitContext,
   filePath: string
 ): Promise<void> {
-  const target = context.target
-  if (target.kind === 'local' || !context.worktreeId) {
-    await window.api.git.stage({
-      worktreePath: resolveLocalWorktreePath(context),
-      filePath,
-      connectionId: context.connectionId
-    })
-    return
-  }
-  await callRuntimeRpc(
-    target,
-    'git.stage',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId), filePath },
-    { timeoutMs: 15_000 }
+  requireSucceeded(
+    await mutateRuntimeGitWorkspace(context, { action: 'stage', filePath }),
+    'Git stage failed'
   )
 }
 
@@ -77,20 +138,9 @@ export async function unstageRuntimeGitPath(
   context: RuntimeGitContext,
   filePath: string
 ): Promise<void> {
-  const target = context.target
-  if (target.kind === 'local' || !context.worktreeId) {
-    await window.api.git.unstage({
-      worktreePath: resolveLocalWorktreePath(context),
-      filePath,
-      connectionId: context.connectionId
-    })
-    return
-  }
-  await callRuntimeRpc(
-    target,
-    'git.unstage',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId), filePath },
-    { timeoutMs: 15_000 }
+  requireSucceeded(
+    await mutateRuntimeGitWorkspace(context, { action: 'unstage', filePath }),
+    'Git unstage failed'
   )
 }
 
@@ -140,20 +190,9 @@ export async function discardRuntimeGitPath(
   context: RuntimeGitContext,
   filePath: string
 ): Promise<void> {
-  const target = context.target
-  if (target.kind === 'local' || !context.worktreeId) {
-    await window.api.git.discard({
-      worktreePath: resolveLocalWorktreePath(context),
-      filePath,
-      connectionId: context.connectionId
-    })
-    return
-  }
-  await callRuntimeRpc(
-    target,
-    'git.discard',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId), filePath },
-    { timeoutMs: 15_000 }
+  requireSucceeded(
+    await mutateRuntimeGitWorkspace(context, { action: 'discard', filePath }),
+    'Git discard failed'
   )
 }
 

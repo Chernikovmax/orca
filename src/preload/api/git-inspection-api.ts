@@ -1,3 +1,4 @@
+import type { GitDiffSelection } from '../../shared/git-diff-document'
 import type {
   GitBranchCompareResult,
   GitCommitCompareResult,
@@ -22,6 +23,8 @@ export type GitInspectionApi = {
     worktreePath: string
     connectionId?: string
     admissionTier?: 'interactive' | 'status' | 'background'
+    includeWorkspace?: boolean
+    workspaceRefsContextId?: string
     includeIgnored?: boolean
     includeLineStats?: boolean
     bypassEffectiveUpstreamNegativeCache?: boolean
@@ -67,6 +70,7 @@ export type GitInspectionApi = {
     filePath: string
     staged: boolean
     compareAgainstHead?: boolean
+    selection?: GitDiffSelection
     connectionId?: string
   }) => Promise<GitDiffResult>
   branchCompare: (args: {
@@ -78,6 +82,8 @@ export type GitInspectionApi = {
   commitCompare: (args: {
     worktreePath: string
     commitId: string
+    contextId?: string
+    baseOid?: string | null
     connectionId?: string
   }) => Promise<GitCommitCompareResult>
   upstreamStatus: (args: {

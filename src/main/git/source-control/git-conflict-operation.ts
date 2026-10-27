@@ -7,12 +7,19 @@ import { gitExecFileAsync } from '../runner'
 import { runWithGitReadCacheInvalidation } from './git-read-cache-invalidation'
 import { resolveGitDir } from './resolve-git-dir'
 
-// Why: the git-status → existsSync race can miss a transient HEAD; fall back to 'unknown' for one poll cycle.
+export type ConflictOperationState = {
+  operation: GitConflictOperation
+  /** True when Git has an unfinished merge/rebase/cherry-pick in this checkout. */
+  inProgress: boolean
+}
+
 // Why: detect rebase from rebase-merge/ or rebase-apply/ dirs (persist all steps), not REBASE_HEAD (partial, lingers → stale badge).
-export async function detectConflictOperation(
+// Why: `unknown` here means "no unfinished operation"; `inProgress` keeps that
+// distinct from a marker layout this host could not classify.
+export async function detectConflictOperationState(
   worktreePath: string,
   options: Pick<GitRuntimeOptions, 'wslDistro'> = {}
-): Promise<GitConflictOperation> {
+): Promise<ConflictOperationState> {
   const gitDir = await resolveGitDir(worktreePath, options)
   const mergeHead = path.join(gitDir, 'MERGE_HEAD')
   const cherryPickHead = path.join(gitDir, 'CHERRY_PICK_HEAD')
@@ -27,15 +34,22 @@ export async function detectConflictOperation(
   const hasRebaseDir = hasRebaseMergeDir || hasRebaseApplyDir
 
   if (hasMergeHead) {
-    return 'merge'
+    return { operation: 'merge', inProgress: true }
   }
   if (hasRebaseDir) {
-    return 'rebase'
+    return { operation: 'rebase', inProgress: true }
   }
   if (hasCherryPickHead) {
-    return 'cherry-pick'
+    return { operation: 'cherry-pick', inProgress: true }
   }
-  return 'unknown'
+  return { operation: 'unknown', inProgress: false }
+}
+
+export async function detectConflictOperation(
+  worktreePath: string,
+  options: Pick<GitRuntimeOptions, 'wslDistro'> = {}
+): Promise<GitConflictOperation> {
+  return (await detectConflictOperationState(worktreePath, options)).operation
 }
 
 /** Mirrors existsSync: any failure to reach the path reads as absent, never as a throw. */

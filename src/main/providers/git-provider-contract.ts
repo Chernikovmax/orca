@@ -1,3 +1,4 @@
+import type { GitDiffSelection } from '../../shared/git-diff-document'
 import type {
   GitBranchCompareResult,
   GitCommitCompareResult,
@@ -35,7 +36,8 @@ export type IGitProvider = {
     worktreePath: string,
     filePath: string,
     staged: boolean,
-    compareAgainstHead?: boolean
+    compareAgainstHead?: boolean,
+    selection?: GitDiffSelection
   ): Promise<GitDiffResult>
   stageFile(worktreePath: string, filePath: string): Promise<void>
   unstageFile(worktreePath: string, filePath: string): Promise<void>
@@ -57,7 +59,11 @@ export type IGitProvider = {
     baseRef: string,
     options?: { admissionTier?: GitAdmissionTier }
   ): Promise<GitBranchCompareResult>
-  getCommitCompare(worktreePath: string, commitId: string): Promise<GitCommitCompareResult>
+  getCommitCompare(
+    worktreePath: string,
+    commitId: string,
+    options?: { contextId?: string; baseOid?: string }
+  ): Promise<GitCommitCompareResult>
   getUpstreamStatus(worktreePath: string, pushTarget?: GitPushTarget): Promise<GitUpstreamStatus>
   pushBranch(
     worktreePath: string,

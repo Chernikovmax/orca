@@ -15,6 +15,7 @@ import type {
 import type { GitLabProjectRef } from './gitlab-types'
 import type { PRCheckDetail, PRCheckRunDetails } from './github/check-types'
 import type { GitHubRepositoryIdentity } from './github/pull-request-types'
+import type { GitDiffSelection } from './git-diff-document'
 
 export type DiffSource =
   | 'unstaged'
@@ -92,6 +93,8 @@ export type EditorTabView =
   | {
       mode: 'diff'
       diffSource?: DiffSource
+      gitDiffSelection?: GitDiffSelection
+      gitDiffRootPath?: string
       branchCompare?: BranchCompareSnapshot
       commitCompare?: CommitCompareSnapshot
       branchOldPath?: string

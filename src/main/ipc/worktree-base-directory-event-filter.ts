@@ -1,3 +1,4 @@
+import { getGitWorkspaceWatchPaths } from '../git/source-control/git-workspace-watch-paths'
 import {
   normalizeRuntimePathForComparison,
   relativePathInsideRoot
@@ -211,11 +212,24 @@ function classifyGitCommonEvent(
   target: WorktreeBaseWatchTarget,
   event: WorktreeBaseWatcherEvent
 ): WorktreeBaseChangeClass {
+  const workspacePaths = getGitWorkspaceWatchPaths(target.path)
+  if (
+    workspacePaths.some(
+      (file) =>
+        normalizeRuntimePathForComparison(file) === normalizeRuntimePathForComparison(event.path)
+    )
+  ) {
+    return gitStatusChange(allRepoIds(target), FULL_HEAD_IDENTITY_SCOPE)
+  }
   const parts = pathRelativeToWorktreeWatchRoot(target.path, event.path)
   if (!parts) {
     return NO_CHANGE
   }
   const repoIds = allRepoIds(target)
+  // Submodule gitdirs (including nested modules) share this existing metadata watch.
+  if (parts[0] === 'modules') {
+    return gitStatusChange(repoIds, FULL_HEAD_IDENTITY_SCOPE)
+  }
   if (parts.length === 1) {
     if (parts[0] === 'worktrees') {
       // The admin root itself appearing, vanishing, or being swapped means the

@@ -1,3 +1,4 @@
+import type { GitDiffSelection } from '../../../../../../shared/git-diff-document'
 import type { RecentlyClosedTabPosition } from '../../recently-closed-tabs'
 import type { EditorFileOperationProvenance } from '@/lib/editor-file-operation-owner'
 import type {
@@ -53,6 +54,8 @@ export type OpenFile = {
   /** Hash fragment to reveal when a preview tab opens from a link (`./guide.md#setup`); kept on tab state so repeat opens can retarget it. */
   markdownPreviewAnchor?: string
   diffSource?: DiffSource
+  gitDiffSelection?: GitDiffSelection
+  gitDiffRootPath?: string
   branchCompare?: BranchCompareSnapshot
   commitCompare?: CommitCompareSnapshot
   branchOldPath?: string
@@ -124,4 +127,6 @@ export type EditorOpenTargetOptions = {
   preview?: boolean
   runtimeEnvironmentId?: string | null
   forceContentReload?: boolean
+  gitDiffSelection?: GitDiffSelection
+  gitDiffRootPath?: string
 }

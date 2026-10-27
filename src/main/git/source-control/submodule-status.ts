@@ -23,13 +23,33 @@ export async function getSubmoduleStatus(
   options: GetStatusOptions & { staged?: boolean } = {}
 ): Promise<GitStatusResult> {
   const submoduleWorktreePath = resolveSubmoduleWorktreePath(worktreePath, submodulePath)
+  const catalog = await getStatus(worktreePath, {
+    ...options,
+    includeWorkspace: true,
+    includeLineStats: false
+  })
+  const contextEntry = catalog.workspace?.submodules.find((entry) => entry.path === submodulePath)
+  const repository = catalog.workspace?.repositories.find(
+    (entry) => entry.context.id === contextEntry?.contextId
+  )
+  if (!repository || contextEntry?.availability !== 'initialized' || contextEntry.error) {
+    throw new Error(
+      'Access denied or unavailable: submodule is not an authorized initialized Git context'
+    )
+  }
   const limit = resolveGitStatusLimit(options.limit)
   // Why: staged expansion only represents HEAD→index; scanning the submodule worktree is wasted work.
   // These three reads are independent, so they run concurrently — on SSH/WSL each one is a real round trip.
   const [workingResult, fromOid, toOid] = await Promise.all([
     options.staged
       ? Promise.resolve<GitStatusResult>({ entries: [], conflictOperation: 'unknown' })
-      : getStatus(submoduleWorktreePath, options),
+      : Promise.resolve<GitStatusResult>({
+          entries: repository.entries,
+          conflictOperation: repository.conflictOperation,
+          head: repository.head,
+          branch: repository.branch,
+          ...(repository.incomplete ? { didHitLimit: true } : {})
+        }),
     // Why: a moved gitlink (clean worktree) has no status rows; surface the parent-commit→checkout range as inner rows.
     options.staged
       ? readGitlinkOidFromTree(worktreePath, 'HEAD', submodulePath, options)

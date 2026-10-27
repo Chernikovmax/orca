@@ -1,4 +1,8 @@
 import type { GitForkSyncExpectedUpstream, GitForkSyncResult } from '../../shared/git-fork-sync'
+import type {
+  GitMutationReceipt,
+  GitWorkspaceMutationRequest
+} from '../../shared/git-workspace-mutation'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { GitPushTarget } from '../../shared/worktree/types'
 import type { GitStageWorktreeScope } from '../../shared/git-stage-worktree-scope'
@@ -98,6 +102,10 @@ export type GitOperationApi = {
     connectionId?: string
   }) => Promise<void>
   stage: (args: { worktreePath: string; filePath: string; connectionId?: string }) => Promise<void>
+  /** One host-authorized workspace write: stage/commit/discard/gitlink, branch checkout, fetch/push, merge/rebase. */
+  mutate: (
+    args: { worktreePath: string; connectionId?: string } & GitWorkspaceMutationRequest
+  ) => Promise<GitMutationReceipt>
   bulkStage: (args: {
     worktreePath: string
     filePaths: string[]

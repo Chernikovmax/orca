@@ -1,16 +1,14 @@
 import type { GitHistoryOptions, GitHistoryResult } from '../../shared/git-history'
-import { loadGitHistoryFromExecutor } from '../../shared/git-history'
 import type { GitRuntimeOptions } from './git-runtime-options'
-import { gitOptionsForWorktree } from './git-runtime-options'
-import { gitExecFileAsync } from './runner'
+import { getWorkspaceHistory } from './source-control/git-workspace-history'
 
+/**
+ * The main-process history entry point. It delegates to the single bounded reader
+ * and adds host-authorized Git context resolution when `contextId` is present.
+ */
 export async function getHistory(
   worktreePath: string,
   options: GitHistoryOptions & GitRuntimeOptions = {}
 ): Promise<GitHistoryResult> {
-  return loadGitHistoryFromExecutor(
-    (args, cwd) => gitExecFileAsync(args, gitOptionsForWorktree(cwd, options)),
-    worktreePath,
-    options
-  )
+  return getWorkspaceHistory(worktreePath, options)
 }

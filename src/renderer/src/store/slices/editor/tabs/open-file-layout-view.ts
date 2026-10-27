@@ -8,6 +8,8 @@ import type { OpenFile } from '../types/open-file'
 
 const DIFF_VIEW_FIELDS = [
   'diffSource',
+  'gitDiffSelection',
+  'gitDiffRootPath',
   'branchCompare',
   'commitCompare',
   'branchOldPath',

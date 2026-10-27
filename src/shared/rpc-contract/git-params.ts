@@ -11,6 +11,8 @@ export const WorktreeSelector = z.object({
 
 export const GitStatusParams = WorktreeSelector.extend({
   admissionTier: OptionalGitAdmissionTier,
+  includeWorkspace: z.boolean().optional(),
+  workspaceRefsContextId: z.string().max(256).optional(),
   includeIgnored: z.boolean().optional(),
   includeLineStats: z.boolean().optional(),
   bypassEffectiveUpstreamNegativeCache: z.boolean().optional(),
@@ -46,9 +48,25 @@ export const GitFilePath = WorktreeSelector.extend({
     .pipe(z.string().min(1, 'Missing file path'))
 })
 
+const GitDiffSide = z.union([
+  z.object({ kind: z.enum(['head', 'index', 'worktree', 'empty']) }),
+  z.object({
+    kind: z.literal('commit'),
+    oid: z.string().regex(/^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/)
+  })
+])
+
+export const GitDiffSelection = z.object({
+  contextId: z.string().max(256).optional(),
+  oldPath: z.string().optional(),
+  left: GitDiffSide,
+  right: GitDiffSide
+})
+
 export const GitDiff = GitFilePath.extend({
   staged: z.boolean(),
-  compareAgainstHead: z.boolean().optional()
+  compareAgainstHead: z.boolean().optional(),
+  selection: GitDiffSelection.optional()
 })
 
 export const GitBranchCompare = WorktreeSelector.extend({
@@ -72,12 +90,33 @@ export const GitCommitCompare = WorktreeSelector.extend({
   commitId: z
     .unknown()
     .transform((v) => (typeof v === 'string' ? v : ''))
-    .pipe(FullGitObjectId)
+    .pipe(FullGitObjectId),
+  contextId: z.string().max(256).optional(),
+  baseOid: FullGitObjectId.optional()
 })
 
 export const GitHistory = WorktreeSelector.extend({
   limit: z.number().int().min(1).max(200).optional(),
-  baseRef: z.string().nullable().optional()
+  baseRef: z.string().nullable().optional(),
+  contextId: z.string().max(256).optional(),
+  revision: z
+    .string()
+    .max(256)
+    .refine((value) => !value.startsWith('-'), 'Revision must not start with -')
+    .optional(),
+  cursor: z
+    .object({
+      tipOid: FullGitObjectId,
+      offset: z.number().int().min(0).max(5000)
+    })
+    .optional(),
+  path: z
+    .string()
+    .min(1)
+    .max(1024)
+    .refine((value) => !value.startsWith('-'), 'Path must not start with -')
+    .optional(),
+  message: z.string().max(200).optional()
 })
 
 export const GitBranchDiff = GitFilePath.extend({
@@ -276,3 +315,11 @@ export const GitRemoteCommitUrl = WorktreeSelector.extend({
     .transform((v) => (typeof v === 'string' ? v : ''))
     .pipe(FullGitObjectId)
 })
+
+
+/** One progress subscription for an explicit fetch/push. */
+export const GitMutationProgressParams = z.object({
+  progressId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/, 'Invalid progress id')
+})
+
+

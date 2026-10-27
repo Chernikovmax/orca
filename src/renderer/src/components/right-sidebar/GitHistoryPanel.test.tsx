@@ -35,7 +35,10 @@ function makeHistoryResult(): GitHistoryResult {
     hasIncomingChanges: false,
     hasOutgoingChanges: false,
     hasMore: false,
-    limit: 50
+    limit: 50,
+    generation: 'gen-1',
+    tipOid: '52ad492abcd',
+    empty: false
   }
 }
 

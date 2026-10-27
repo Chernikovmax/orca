@@ -8,6 +8,11 @@ import {
   bulkUnstageFiles,
   stageWorktreeChanges
 } from '../../git/status'
+import type {
+  GitMutationReceipt,
+  GitWorkspaceMutationRequest
+} from '../../../shared/git-workspace-mutation'
+import { mutateGitWorkspace } from '../../git/source-control/git-workspace-mutation'
 import { resolveRegisteredWorktreePath } from '../registered-worktree-roots-cache'
 import {
   getLocalGitOptionsForRegisteredWorktree,
@@ -22,6 +27,43 @@ import { getConnectionExecutionHostId } from '../../../shared/execution-host'
 
 export function registerFilesystemGitIndexHandlers(context: FilesystemHandlerContext): void {
   const { store } = context
+  ipcMain.handle(
+    'git:mutate',
+    async (
+      _event,
+      args: { worktreePath: string; connectionId?: string } & GitWorkspaceMutationRequest
+    ): Promise<GitMutationReceipt> => {
+      requireReachableGitRoute(getConnectionExecutionHostId(args.connectionId))
+      const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
+      const filePath =
+        args.filePath === undefined
+          ? undefined
+          : validateGitRelativeFilePath(worktreePath, args.filePath)
+      const oldPath =
+        args.oldPath === undefined
+          ? undefined
+          : validateGitRelativeFilePath(worktreePath, args.oldPath)
+      const gitOptions = getLocalGitOptionsForRegisteredWorktree(
+        store,
+        args.worktreePath,
+        worktreePath
+      )
+      const repo = getLocalRepoForRegisteredWorktree(store, args.worktreePath, worktreePath)
+      return mutateGitWorkspace(
+        worktreePath,
+        {
+          ...args,
+          ...(filePath === undefined ? {} : { filePath }),
+          ...(oldPath === undefined ? {} : { oldPath })
+        },
+        {
+          ...gitOptions,
+          admissionTier: 'interactive',
+          ...(repo ? { sharedLinkPaths: getWorktreeSharedLinkPaths(repo) } : {})
+        }
+      )
+    }
+  )
   ipcMain.handle(
     'git:stage',
     async (

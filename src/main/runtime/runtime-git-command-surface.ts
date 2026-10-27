@@ -31,6 +31,7 @@ type RuntimeGitCommandName =
   | 'cancelRuntimeGeneratePullRequestFields'
   | 'stageRuntimeGitPath'
   | 'unstageRuntimeGitPath'
+  | 'mutateRuntimeGitWorkspace'
   | 'bulkStageRuntimeGitPaths'
   | 'bulkUnstageRuntimeGitPaths'
   | 'bulkDiscardRuntimeGitPaths'
@@ -76,6 +77,7 @@ export function installRuntimeGitCommandSurface(
       commands.cancelRuntimeGeneratePullRequestFields.bind(commands),
     stageRuntimeGitPath: commands.stageRuntimeGitPath.bind(commands),
     unstageRuntimeGitPath: commands.unstageRuntimeGitPath.bind(commands),
+    mutateRuntimeGitWorkspace: commands.mutateRuntimeGitWorkspace.bind(commands),
     bulkStageRuntimeGitPaths: commands.bulkStageRuntimeGitPaths.bind(commands),
     bulkUnstageRuntimeGitPaths: commands.bulkUnstageRuntimeGitPaths.bind(commands),
     bulkDiscardRuntimeGitPaths: commands.bulkDiscardRuntimeGitPaths.bind(commands),

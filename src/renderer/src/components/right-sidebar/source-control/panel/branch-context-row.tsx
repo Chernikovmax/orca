@@ -16,6 +16,7 @@ import {
   type SourceControlBranchContextStat
 } from './branch-context-stats'
 
+import { requestGitContextPopup } from '@/lib/git-context-popup-command'
 function BaseRefButton({
   baseRef,
   displayLabel,
@@ -102,15 +103,18 @@ function resolveHeadFlowLabel(
 }
 
 function HeadIdentity({ display }: { display: WorktreeGitIdentityDisplay }): React.JSX.Element {
+  const openContexts = requestGitContextPopup
   if (display.kind === 'detached') {
     return (
-      <DetachedHeadBadge
-        display={display}
-        side="bottom"
-        // Why: tooltip carries the full detached explanation; keep it keyboard-reachable.
-        tabIndex={0}
-        className="min-w-0 max-w-full shrink"
-      />
+      <button
+        type="button"
+        onClick={openContexts}
+        aria-label="Open Git contexts and branches"
+        title="Git contexts and branches (Ctrl+Alt+G)"
+        className="min-w-0 max-w-full rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <DetachedHeadBadge display={display} side="bottom" className="min-w-0 max-w-full shrink" />
+      </button>
     )
   }
 
@@ -127,14 +131,16 @@ function HeadIdentity({ display }: { display: WorktreeGitIdentityDisplay }): Rea
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
+        <button
+          type="button"
           className="block min-w-0 max-w-full truncate rounded-sm font-mono text-[10.5px] font-medium text-foreground/90 outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          tabIndex={0}
-          aria-label={branchAriaLabel}
+          onClick={openContexts}
+          aria-label={`${branchAriaLabel}; Open Git contexts and branches`}
           data-testid="source-control-head-identity"
+          title="Git contexts and branches (Ctrl+Alt+G)"
         >
           {display.branchName}
-        </span>
+        </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={6} className="max-w-72 break-all font-mono">
         {display.branchName}

@@ -1,9 +1,11 @@
+import { GIT_HISTORY_COMMIT_FORMAT, parseGitHistoryLog, shortGitHash } from './git-history-log-parser'
 import {
-  GIT_HISTORY_COMMIT_FORMAT,
-  gitHistoryRefFromFullName,
-  parseGitHistoryLog,
-  shortGitHash
-} from './git-history-log-parser'
+  resolveHistoryCommit,
+  resolveHistoryCurrentRef,
+  resolveHistoryNamedRef,
+  resolveHistoryUpstreamRef
+} from './git-history-refs'
+import { GitHistoryReadError, gitHistoryGeneration, validateHistoryCursor, validateHistoryPath, validateMessageFilter } from './git-history-options'
 import {
   GIT_HISTORY_DEFAULT_LIMIT,
   GIT_HISTORY_MAX_LIMIT,
@@ -14,6 +16,7 @@ import {
 } from './git-history-types'
 
 export type {
+  GitHistoryCursor,
   GitHistoryExecutor,
   GitHistoryGraphColorId,
   GitHistoryItem,
@@ -28,10 +31,12 @@ export {
   GIT_HISTORY_DEFAULT_LIMIT,
   GIT_HISTORY_LANE_COLORS,
   GIT_HISTORY_MAX_LIMIT,
+  GIT_HISTORY_MAX_OFFSET,
   GIT_HISTORY_REF_COLOR,
   GIT_HISTORY_REMOTE_REF_COLOR
 } from './git-history-types'
 export { compareGitHistoryItemRefsByCategory, parseGitHistoryLog } from './git-history-log-parser'
+export { GitHistoryReadError } from './git-history-options'
 
 function clampHistoryLimit(limit: number | undefined): number {
   if (!Number.isFinite(limit)) {
@@ -43,161 +48,99 @@ function clampHistoryLimit(limit: number | undefined): number {
   )
 }
 
-async function resolveCommit(
-  git: GitHistoryExecutor,
-  cwd: string,
-  ref: string
-): Promise<string | null> {
-  if (!ref || ref.startsWith('-')) {
-    return null
-  }
-  try {
-    const { stdout } = await git(
-      ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`],
-      cwd
-    )
-    const oid = stdout.trim()
-    return oid || null
-  } catch {
-    return null
-  }
-}
-
-async function resolveSymbolicFullName(
-  git: GitHistoryExecutor,
-  cwd: string,
-  ref: string
-): Promise<string | null> {
-  if (!ref || ref.startsWith('-')) {
-    return null
-  }
-  try {
-    const { stdout } = await git(
-      ['rev-parse', '--symbolic-full-name', '--end-of-options', ref],
-      cwd
-    )
-    // Why skip the marker: --verify swallows --end-of-options, but
-    // --symbolic-full-name deliberately echoes it, so the first line is the marker
-    // rather than the ref. Taking it made every branch and tag fall through
-    // gitHistoryRefFromFullName's prefix checks into the "commits" category.
-    return (
-      stdout
-        .trim()
-        .split(/\r?\n/)
-        .find((line) => line && line !== '--end-of-options') ?? null
-    )
-  } catch {
-    return null
-  }
-}
-
-async function resolveCurrentRef(
-  git: GitHistoryExecutor,
-  cwd: string,
-  headOid: string
-): Promise<{ currentRef: GitHistoryItemRef; branchName: string | null }> {
-  try {
-    const { stdout } = await git(['symbolic-ref', '--quiet', '--short', 'HEAD'], cwd)
-    const branchName = stdout.trim()
-    if (branchName) {
-      return {
-        branchName,
-        currentRef: {
-          id: `refs/heads/${branchName}`,
-          name: branchName,
-          revision: headOid,
-          category: 'branches'
-        }
-      }
-    }
-  } catch {
-    // Detached HEAD.
-  }
-
-  return {
-    branchName: null,
-    currentRef: { id: headOid, name: shortGitHash(headOid), revision: headOid, category: 'commits' }
-  }
-}
-
-async function resolveUpstreamRef(
-  git: GitHistoryExecutor,
-  cwd: string,
-  branchName: string | null
-): Promise<GitHistoryItemRef | undefined> {
-  if (!branchName) {
-    return undefined
-  }
-  try {
-    const { stdout } = await git(
-      ['for-each-ref', '--format=%(upstream)%00%(upstream:short)', `refs/heads/${branchName}`],
-      cwd
-    )
-    const [fullName, shortName] = stdout.split('\0')
-    const upstreamRef = fullName?.trim()
-    const upstreamShortName = shortName?.trim()
-    if (!upstreamRef || !upstreamShortName) {
-      return undefined
-    }
-    // Why: %(upstream:objectname) is not portable across Git versions; resolve
-    // the upstream name first, then ask rev-parse for the commit object.
-    const oid = await resolveCommit(git, cwd, upstreamRef)
-    return oid ? gitHistoryRefFromFullName(upstreamRef, upstreamShortName, oid) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-async function resolveNamedRef(
-  git: GitHistoryExecutor,
-  cwd: string,
-  ref: string | null | undefined
-): Promise<GitHistoryItemRef | undefined> {
-  const normalized = ref?.trim()
-  if (!normalized || normalized.startsWith('-')) {
-    return undefined
-  }
-  const [revision, fullName] = await Promise.all([
-    resolveCommit(git, cwd, normalized),
-    resolveSymbolicFullName(git, cwd, normalized)
-  ])
-  return revision ? gitHistoryRefFromFullName(fullName, normalized, revision) : undefined
-}
-
 export async function loadGitHistoryFromExecutor(
   git: GitHistoryExecutor,
   cwd: string,
   options: GitHistoryOptions = {}
 ): Promise<GitHistoryResult> {
   const limit = clampHistoryLimit(options.limit)
-  const headOid = await resolveCommit(git, cwd, 'HEAD')
-  if (!headOid) {
+  const cursor = validateHistoryCursor(options.cursor)
+  const revision = options.revision?.trim() || null
+  const pathFilter = options.path ? validateHistoryPath(options.path) : null
+  const messageFilter = options.message?.trim() ? validateMessageFilter(options.message.trim()) : null
+  const headOid = await resolveHistoryCommit(git, cwd, 'HEAD')
+
+  if (!cursor && !revision && !headOid) {
     return {
       items: [],
       hasIncomingChanges: false,
       hasOutgoingChanges: false,
       hasMore: false,
-      limit
+      limit,
+      generation: gitHistoryGeneration(options, ''),
+      tipOid: '',
+      empty: true
     }
   }
 
-  const { currentRef, branchName } = await resolveCurrentRef(git, cwd, headOid)
-  const [remoteRef, rawBaseRef] = await Promise.all([
-    resolveUpstreamRef(git, cwd, branchName),
-    resolveNamedRef(git, cwd, options.baseRef)
-  ])
+  let tipOid: string
+  let browsedRef: GitHistoryItemRef | undefined
+  if (cursor) {
+    const pinned = await resolveHistoryCommit(git, cwd, cursor.tipOid)
+    if (!pinned) {
+      throw new GitHistoryReadError(
+        'unavailable',
+        `Commit ${cursor.tipOid} is not available locally; no fetch was attempted.`
+      )
+    }
+    tipOid = pinned
+  } else if (revision) {
+    const resolved = await resolveHistoryCommit(git, cwd, revision)
+    if (!resolved) {
+      throw new GitHistoryReadError(
+        'unavailable',
+        `Revision ${revision} is not available locally; no fetch was attempted.`
+      )
+    }
+    tipOid = resolved
+    if (revision.toUpperCase() !== 'HEAD') {
+      browsedRef = (await resolveHistoryNamedRef(git, cwd, revision)) ?? {
+        id: tipOid,
+        name: shortGitHash(tipOid),
+        revision: tipOid,
+        category: 'commits'
+      }
+    }
+  } else {
+    tipOid = headOid!
+  }
+
+  let currentRef: GitHistoryItemRef
+  let branchName: string | null = null
+  if (headOid) {
+    const resolved = await resolveHistoryCurrentRef(git, cwd, headOid)
+    currentRef = resolved.currentRef
+    branchName = resolved.branchName
+  } else {
+    currentRef = browsedRef ?? {
+      id: tipOid,
+      name: shortGitHash(tipOid),
+      revision: tipOid,
+      category: 'commits'
+    }
+  }
+
+  // Why: a continuation page must not re-resolve upstream/base, because those refs
+  // may have moved after the first page was pinned.
+  const [remoteRef, rawBaseRef] =
+    cursor === undefined
+      ? await Promise.all([
+          resolveHistoryUpstreamRef(git, cwd, branchName),
+          resolveHistoryNamedRef(git, cwd, options.baseRef)
+        ])
+      : [undefined, undefined]
 
   const baseRef =
     rawBaseRef && rawBaseRef.id !== remoteRef?.id && rawBaseRef.id !== currentRef.id
       ? rawBaseRef
       : undefined
 
-  // Why: this panel is scoped to the active workspace. Upstream and base refs
-  // stay as comparison metadata so old workspaces do not list newly fetched upstream/base commits.
-  const historyRevisions = [headOid]
+  // Why: incoming/outgoing boundary rows describe HEAD against its upstream, so
+  // they are only meaningful for the default HEAD walk without filters.
+  const tracksHead = cursor === undefined && revision === null && !pathFilter && !messageFilter
 
   let mergeBase: string | undefined
-  if (remoteRef?.revision && currentRef.revision && remoteRef.revision !== currentRef.revision) {
+  if (tracksHead && remoteRef?.revision && currentRef.revision && remoteRef.revision !== currentRef.revision) {
     try {
       const { stdout } = await git(['merge-base', currentRef.revision, remoteRef.revision], cwd)
       mergeBase = stdout.trim() || undefined
@@ -206,25 +149,49 @@ export async function loadGitHistoryFromExecutor(
     }
   }
 
-  const { stdout } = await git(
-    [
-      'log',
-      '--no-show-signature',
-      '--no-color',
-      `--format=${GIT_HISTORY_COMMIT_FORMAT}`,
-      '-z',
-      '--topo-order',
-      '--decorate=full',
-      `-n${limit + 1}`,
-      ...historyRevisions
-    ],
-    cwd
-  )
+  const offset = cursor?.offset ?? 0
+  const logArgs = [
+    'log',
+    '--no-show-signature',
+    '--no-color',
+    `--format=${GIT_HISTORY_COMMIT_FORMAT}`,
+    '-z',
+    '--topo-order',
+    '--decorate=full'
+  ]
+  if (offset > 0) {
+    logArgs.push(`--skip=${offset}`)
+  }
+  logArgs.push(`-n${limit + 1}`)
+  if (messageFilter) {
+    logArgs.push('--fixed-strings', '--regexp-ignore-case', `--grep=${messageFilter}`)
+  }
+  logArgs.push(tipOid)
+  if (pathFilter) {
+    logArgs.push('--', `:(literal)${pathFilter}`)
+  }
+
+  let stdout: string
+  try {
+    stdout = (await git(logArgs, cwd)).stdout
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (/bad object|missing|not a tree|unable to read|could not read|revision walk setup failed/i.test(message)) {
+      throw new GitHistoryReadError(
+        'unavailable',
+        'Git history references an object that is not available locally; no fetch was attempted.'
+      )
+    }
+    throw new GitHistoryReadError('git-error', message || 'git log failed')
+  }
+
   const parsed = parseGitHistoryLog(stdout)
   const items = parsed.slice(0, limit)
+  const hasMore = parsed.length > limit
   const hasIncomingChanges =
-    Boolean(remoteRef?.revision && mergeBase) && remoteRef?.revision !== mergeBase
+    tracksHead && Boolean(remoteRef?.revision && mergeBase) && remoteRef?.revision !== mergeBase
   const hasOutgoingChanges =
+    tracksHead &&
     Boolean(currentRef.revision && remoteRef?.revision && mergeBase) &&
     currentRef.revision !== mergeBase
 
@@ -236,7 +203,12 @@ export async function loadGitHistoryFromExecutor(
     mergeBase,
     hasIncomingChanges,
     hasOutgoingChanges,
-    hasMore: parsed.length > limit,
-    limit
+    hasMore,
+    limit,
+    generation: gitHistoryGeneration(options, tipOid),
+    tipOid,
+    ...(browsedRef ? { browsedRef } : {}),
+    empty: false,
+    ...(hasMore ? { nextCursor: { tipOid, offset: offset + items.length } } : {})
   }
 }

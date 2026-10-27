@@ -162,6 +162,8 @@ export function applyOpenFileToState(
                 : f.operationProvenance,
               mode: file.mode,
               diffSource: file.diffSource,
+              gitDiffSelection: file.gitDiffSelection,
+              gitDiffRootPath: file.gitDiffRootPath,
               branchCompare: file.branchCompare,
               commitCompare: file.commitCompare,
               branchOldPath: file.branchOldPath,

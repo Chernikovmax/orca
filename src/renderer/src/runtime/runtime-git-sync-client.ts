@@ -5,6 +5,7 @@ import type { GitPushTarget } from '../../../shared/worktree/types'
 import { resolveLocalWorktreePath, type RuntimeGitContext } from './runtime-git-client-context'
 import { callRuntimeRpc } from './runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
+import { mutateRuntimeGitWorkspace } from './runtime-git-working-tree-client'
 
 export async function abortRuntimeGitMerge(context: RuntimeGitContext): Promise<void> {
   const target = context.target
@@ -212,18 +213,8 @@ export async function commitRuntimeGit(
   context: RuntimeGitContext,
   message: string
 ): Promise<{ success: boolean; error?: string }> {
-  const target = context.target
-  if (target.kind === 'local' || !context.worktreeId) {
-    return window.api.git.commit({
-      worktreePath: resolveLocalWorktreePath(context),
-      message,
-      connectionId: context.connectionId
-    })
-  }
-  return callRuntimeRpc<{ success: boolean; error?: string }>(
-    target,
-    'git.commit',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId), message },
-    { timeoutMs: 30_000 }
-  )
+  const receipt = await mutateRuntimeGitWorkspace(context, { action: 'commit', message })
+  return receipt.outcome === 'succeeded'
+    ? { success: true }
+    : { success: false, error: receipt.error ?? 'Commit failed' }
 }

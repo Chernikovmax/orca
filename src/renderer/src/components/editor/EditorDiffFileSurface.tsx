@@ -6,27 +6,11 @@ import { DiffViewer, ImageDiffViewer, MarkdownPreview } from './editor-lazy-view
 import { ExternalFileChangeBanner } from './ExternalFileChangeBanner'
 import { MarkdownPreviewSizeGate } from './MarkdownPreviewSizeGate'
 import type { useMarkdownDocuments } from './useMarkdownDocuments'
+import { GitDiffDocumentSurface } from './GitDiffDocumentSurface'
 
 type MarkdownDocumentsController = ReturnType<typeof useMarkdownDocuments>
 
-export function EditorDiffFileSurface({
-  activeFile,
-  diffContent,
-  editBuffer,
-  resolvedLanguage,
-  sideBySide,
-  viewStateScopeId,
-  diffViewStateKey,
-  mdViewMode,
-  isMarkdown,
-  showMarkdownTableOfContents,
-  onCloseMarkdownTableOfContents,
-  markdownAnnotationsEnabled,
-  markdownDocuments,
-  onContentChange,
-  onSave,
-  reloadContent
-}: {
+type EditorDiffFileSurfaceProps = {
   activeFile: OpenFile
   diffContent: GitDiffResult | undefined
   editBuffer: string | undefined
@@ -43,7 +27,36 @@ export function EditorDiffFileSurface({
   onContentChange: (content: string) => void
   onSave: (content: string) => Promise<boolean>
   reloadContent: (file: OpenFile) => void
-}): React.JSX.Element {
+}
+
+export function EditorDiffFileSurface(props: EditorDiffFileSurfaceProps) {
+  return <GitDiffDocumentSurface
+    key={props.activeFile.gitDiffSelection?.contextId ?? props.activeFile.worktreeId}
+    file={props.activeFile}
+    result={props.diffContent}
+    sideBySide={props.sideBySide}
+    reload={() => props.reloadContent(props.activeFile)}
+  >{(sideBySide) => <EditorDiffFileBody {...props} sideBySide={sideBySide} />}</GitDiffDocumentSurface>
+}
+
+function EditorDiffFileBody({
+  activeFile,
+  diffContent,
+  editBuffer,
+  resolvedLanguage,
+  sideBySide,
+  viewStateScopeId,
+  diffViewStateKey,
+  mdViewMode,
+  isMarkdown,
+  showMarkdownTableOfContents,
+  onCloseMarkdownTableOfContents,
+  markdownAnnotationsEnabled,
+  markdownDocuments,
+  onContentChange,
+  onSave,
+  reloadContent
+}: EditorDiffFileSurfaceProps): React.JSX.Element {
   if (!diffContent) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -52,7 +65,7 @@ export function EditorDiffFileSurface({
     )
   }
 
-  const isEditable = activeFile.diffSource === 'unstaged'
+  const isEditable = activeFile.diffSource === 'unstaged' && !activeFile.gitDiffSelection && !diffContent.document?.special
   if (diffContent.kind === 'binary') {
     if (diffContent.isImage) {
       return (
