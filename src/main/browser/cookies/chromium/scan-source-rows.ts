@@ -109,7 +109,6 @@ export function scanChromiumCookieRows(
       expirationDate: expiresUtc > 0 ? expiresUtc : undefined,
       partition
     })
-    context.domainSet.add(domain.startsWith('.') ? domain.slice(1) : domain)
   }
 
   diag(

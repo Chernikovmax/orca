@@ -232,7 +232,7 @@ describe('Chromium import snapshot ownership', () => {
     )
     expect(await importChromiumCookies(chromeBrowser(sourcePath), PARTITION)).toMatchObject({
       ok: true,
-      summary: { importedCookies: 0, skippedCookies: 1 }
+      summary: { importedCookies: 0, skippedCookies: 1, domains: [] }
     })
     expect(cleanupStates).toHaveLength(1)
     expectRefusalCleanup()

@@ -51,6 +51,7 @@ export async function finalizeChromiumCookieImport(
       log: diag
     })
     context.memoryLoaded = phase.importedCount
+    context.domainSet = phase.domains
     context.memoryFailed += phase.writeRejected
     context.skipped += phase.expired
   } finally {

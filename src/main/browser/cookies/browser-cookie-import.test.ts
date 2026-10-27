@@ -632,8 +632,8 @@ describe('importCookiesFromBrowser Chromium', () => {
   it('skips an oversized rejected row on a fresh target without producing replay', async () => {
     const sourceCookiesPath = join(tmpDir, 'Chrome', 'Default', 'Network', 'Cookies')
     createChromiumCookieTestDatabase(sourceCookiesPath, [
-      { name: 'oversized', value: 'v'.repeat(4096) },
-      { name: 'sid', value: 'source-value' }
+      { domain: '.failed.example', name: 'oversized', value: 'v'.repeat(4096) },
+      { domain: '.good.example', name: 'sid', value: 'source-value' }
     ]).close()
     cookieWriteMock.mockRejectedValueOnce(new Error('cookie rejected'))
     // A new profile need not have a storage path or Cookies database to accept live writes.
@@ -647,7 +647,8 @@ describe('importCookiesFromBrowser Chromium', () => {
     expect(result.ok && result.summary).toMatchObject({
       totalCookies: 2,
       importedCookies: 1,
-      skippedCookies: 1
+      skippedCookies: 1,
+      domains: ['good.example']
     })
     expect(result.ok && result.summary.warning).toBeUndefined()
     expect(cookieWriteMock).toHaveBeenCalledTimes(2)
