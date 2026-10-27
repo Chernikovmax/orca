@@ -242,7 +242,7 @@ async function idleReleasePhase(): Promise<void> {
       .map((row) => `${row.pid} ${row.command}`)
     receipt.holderState = await holder.holderState(PLAIN)
     receipt.stillRunning = await guest(
-      'ls -la "$HOME/.orca/wsl-holder-release" 2>&1; ps -eo pid,ppid,sid,stat,args | grep -v orca-wsl-exec-loop || true'
+      'cat /proc/uptime; ls -la "$HOME/.orca/wsl-holder-release" 2>&1; ps -eo pid,ppid,sid,stat,args | grep -v orca-wsl-exec-loop || true; for p in $(ps -eo pid=,ppid=,args= | awk \'$2 == 1 && $3 == "/init" {print $1}\'); do echo "INIT $p $(cut -d" " -f22 /proc/$p/stat)"; done'
     ).catch(String)
     throw error
   })
