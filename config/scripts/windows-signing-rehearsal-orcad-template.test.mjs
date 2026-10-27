@@ -16,7 +16,7 @@ const stepIndex = (name) => rehearse.steps.findIndex((step) => step.name === nam
 describe('Windows signing rehearsal ships the orcad template', () => {
   it('packages the qualified template built from the dispatched commit', () => {
     expect(jobs['orcad-template'].uses).toBe('./.github/workflows/qualified-orcad-template.yml')
-    expect(jobs['orcad-template'].with.ref).toBe('${{ github.sha }}')
+    expect(jobs['orcad-template'].with).toEqual({ ref: '${{ github.sha }}', fast_runners: false })
     expect(rehearse.needs).toBe('orcad-template')
     expect(rehearse.env.ORCA_REQUIRE_ORCAD_TEMPLATE).toBe('1')
     const download = stepIndex('Download the orcad deployment template')
