@@ -59,6 +59,7 @@ export function WorkspaceChangesList({
                 const module = gitlinkFor(entry)
                 const discardable =
                   entry.area === 'unstaged' &&
+                  entry.conflictStatus !== 'unresolved' &&
                   !module &&
                   !entry.oldPath &&
                   (entry.status === 'modified' || entry.status === 'deleted')
@@ -93,7 +94,12 @@ export function WorkspaceChangesList({
                             <Button
                               variant="outline"
                               size="xs"
-                              disabled={busy || !module.currentOid || !module.contextId}
+                              disabled={
+                                busy ||
+                                entry.conflictStatus === 'unresolved' ||
+                                !module.currentOid ||
+                                !module.contextId
+                              }
                               data-testid="stage-gitlink"
                               data-path={entry.path}
                               title="Records the reviewed child commit in the parent index; child files are not staged"

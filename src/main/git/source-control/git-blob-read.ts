@@ -4,10 +4,32 @@ import { isBinaryBuffer } from '../../../shared/binary-buffer'
 import { isMissingGitBlobPath } from '../../../shared/git-blob-absence'
 import type { GitRuntimeOptions } from '../git-runtime-options'
 import { gitReadOptionsForWorktree } from '../git-runtime-options'
-import { gitExecFileAsyncBuffer } from '../runner'
+import { gitExecFileAsyncBuffer, gitOptionalLocksDisabledEnv } from '../runner'
 import { isMaxBufferOverflowError } from '../max-buffer-overflow'
 import { MAX_GIT_SHOW_BYTES } from './git-show-max-bytes'
 import { PREVIEWABLE_BINARY_MIME_TYPES } from './previewable-binary-mime-types'
+import { workspaceGitRead } from './git-workspace-discovery'
+
+export async function readGitBlobBytes(
+  cwd: string,
+  oid: string,
+  options: GitRuntimeOptions,
+  maxBytes: number,
+  knownSize?: number
+): Promise<Buffer> {
+  const size =
+    knownSize ?? Number((await workspaceGitRead(cwd, ['cat-file', '-s', oid], options)).trim())
+  if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes) {
+    throw new Error('Git blob exceeds the bounded content limit')
+  }
+  const { stdout } = await gitExecFileAsyncBuffer(['cat-file', 'blob', oid], {
+    ...gitReadOptionsForWorktree(cwd, options),
+    env: { ...gitOptionalLocksDisabledEnv(), GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '' },
+    maxBuffer: maxBytes,
+    timeout: 15_000
+  })
+  return stdout
+}
 
 export type GitBlobReadResult = {
   content: string

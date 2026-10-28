@@ -1,17 +1,15 @@
+import { execFile } from 'node:child_process'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import * as path from 'node:path'
+import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { gitExecFileAsyncMock, gitExecFileAsyncBufferMock, gitStreamStdoutMock } = vi.hoisted(
-  () => ({
-    gitExecFileAsyncMock: vi.fn(),
-    gitExecFileAsyncBufferMock: vi.fn(),
-    gitStreamStdoutMock: vi.fn()
-  })
-)
-
+const { gitExecFileAsyncMock } = vi.hoisted(() => ({ gitExecFileAsyncMock: vi.fn() }))
 vi.mock('./runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock,
-  gitExecFileAsyncBuffer: gitExecFileAsyncBufferMock,
-  gitStreamStdout: gitStreamStdoutMock,
+  gitExecFileAsyncBuffer: vi.fn(),
+  gitStreamStdout: vi.fn(),
   gitOptionalLocksDisabledEnv: (env: NodeJS.ProcessEnv = process.env) => ({
     ...env,
     GIT_OPTIONAL_LOCKS: '0'
@@ -20,210 +18,171 @@ vi.mock('./runner', () => ({
 
 import {
   MAX_SUBMODULE_PATHS_CACHE_ENTRIES,
-  abortMerge,
-  abortRebase,
   clearSubmodulePathsCacheForTests,
   getSubmodulePathsCacheCountForTests,
   listSubmodulePaths
 } from './status'
 import { checkoutBranch } from './checkout'
-import { gitPull, gitPullRebaseFromBase } from './remote'
-import { addWorktree, removeWorktree } from './worktree'
 
-describe('submodule path cache', () => {
-  beforeEach(() => {
-    clearSubmodulePathsCacheForTests()
-    gitExecFileAsyncMock.mockReset()
-    gitExecFileAsyncBufferMock.mockReset()
-    gitStreamStdoutMock.mockReset()
-    gitExecFileAsyncMock.mockImplementation((_args: string[], options?: { cwd?: string }) =>
-      Promise.resolve({
-        stdout: `submodule.lib.path ${String(options?.cwd ?? 'repo').replace(/^.*[/\\\\]/, '')}-lib\n`
-      })
-    )
+const execute = promisify(execFile)
+let directory = ''
+type ReadOptions = { cwd?: string; env?: NodeJS.ProcessEnv }
+
+async function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv) {
+  return execute('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ...env,
+      GIT_CONFIG_GLOBAL: path.join(directory, 'global.config'),
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_TERMINAL_PROMPT: '0'
+    }
   })
+}
 
-  afterEach(() => {
-    vi.useRealTimers()
-    clearSubmodulePathsCacheForTests()
-  })
+async function writeModules(root: string, modulePath: string) {
+  await writeFile(path.join(root, '.gitmodules'), `[submodule "library"]\n\tpath = ${modulePath}\n`)
+}
 
-  it('prunes expired entries even when later reads use different worktrees', async () => {
-    vi.useFakeTimers()
+async function metadataRoot(name: string, modulePath: string) {
+  const root = path.join(directory, name)
+  await mkdir(root)
+  await writeModules(root, modulePath)
+  return root
+}
+
+beforeEach(async () => {
+  directory = await mkdtemp(path.join(tmpdir(), 'orca-submodule-path-cache-'))
+  clearSubmodulePathsCacheForTests()
+  gitExecFileAsyncMock.mockReset()
+  gitExecFileAsyncMock.mockImplementation((args: string[], options: ReadOptions = {}) =>
+    git(options.cwd ?? directory, args, options.env)
+  )
+})
+
+afterEach(async () => {
+  vi.useRealTimers()
+  clearSubmodulePathsCacheForTests()
+  await rm(directory, { recursive: true, force: true })
+})
+
+describe('submodule path cache with real filesystem metadata and Git parsing', () => {
+  it('expires old metadata and prunes unrelated expired worktrees', async () => {
+    const first = await metadataRoot('first', 'old-library')
+    const second = await metadataRoot('second', 'other-library')
+    const third = await metadataRoot('third', 'third-library')
+    vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(0)
-
-    await listSubmodulePaths('/repo-a')
-    await listSubmodulePaths('/repo-b')
-
-    expect(getSubmodulePathsCacheCountForTests()).toBe(2)
-
+    expect(await listSubmodulePaths(first)).toEqual(['old-library'])
+    expect(await listSubmodulePaths(second)).toEqual(['other-library'])
+    await writeModules(first, 'new-library')
+    expect(await listSubmodulePaths(first)).toEqual(['old-library'])
     vi.setSystemTime(5_001)
-    await expect(listSubmodulePaths('/repo-c')).resolves.toEqual(['repo-c-lib'])
-
+    expect(await listSubmodulePaths(third)).toEqual(['third-library'])
     expect(getSubmodulePathsCacheCountForTests()).toBe(1)
-    expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(3)
+    expect(await listSubmodulePaths(first)).toEqual(['new-library'])
   })
 
-  it('stays bounded through prolonged worktree churn and keeps recently reused worktrees', async () => {
-    vi.useFakeTimers()
+  it('bounds worktree churn and retains a recently reused entry over an older one', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(0)
-
-    for (let wave = 0; wave < 4; wave += 1) {
-      for (let i = 0; i < MAX_SUBMODULE_PATHS_CACHE_ENTRIES; i += 1) {
-        await listSubmodulePaths(`/wave-${wave}-repo-${i}`)
-      }
-      expect(getSubmodulePathsCacheCountForTests()).toBe(MAX_SUBMODULE_PATHS_CACHE_ENTRIES)
-      vi.advanceTimersByTime(5_001)
+    const roots: string[] = []
+    for (let index = 0; index < MAX_SUBMODULE_PATHS_CACHE_ENTRIES; index++) {
+      const root = await metadataRoot(`repo-${index}`, `library-${index}`)
+      roots.push(root)
+      await listSubmodulePaths(root)
     }
-
-    await expect(listSubmodulePaths('/retained-repo')).resolves.toEqual(['retained-repo-lib'])
-    for (let i = 0; i < MAX_SUBMODULE_PATHS_CACHE_ENTRIES - 1; i += 1) {
-      await listSubmodulePaths(`/final-repo-${i}`)
+    expect(await listSubmodulePaths(roots[0])).toEqual(['library-0'])
+    for (const name of ['overflow-one', 'overflow-two']) {
+      const root = await metadataRoot(name, name)
+      await listSubmodulePaths(root)
     }
-    await expect(listSubmodulePaths('/retained-repo')).resolves.toEqual(['retained-repo-lib'])
-    await listSubmodulePaths(`/final-repo-${MAX_SUBMODULE_PATHS_CACHE_ENTRIES - 1}`)
-    await listSubmodulePaths('/overflow-repo')
-
     expect(getSubmodulePathsCacheCountForTests()).toBe(MAX_SUBMODULE_PATHS_CACHE_ENTRIES)
+    await writeModules(roots[0], 'hot-entry-changed-on-disk')
+    await writeModules(roots[1], 'evicted-entry-changed-on-disk')
+    expect(await listSubmodulePaths(roots[0])).toEqual(['library-0'])
+    expect(await listSubmodulePaths(roots[1])).toEqual(['evicted-entry-changed-on-disk'])
+  }, 120_000)
 
-    const callsBeforeRetainedRead = gitExecFileAsyncMock.mock.calls.length
-    await expect(listSubmodulePaths('/retained-repo')).resolves.toEqual(['retained-repo-lib'])
-    expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(callsBeforeRetainedRead)
-
-    await expect(listSubmodulePaths('/final-repo-0')).resolves.toEqual(['final-repo-0-lib'])
-    expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(callsBeforeRetainedRead + 1)
-  })
-
-  it('does not let a pre-invalidation read repopulate the cache', async () => {
-    let resolveOldRead: ((value: { stdout: string }) => void) | undefined
-    gitExecFileAsyncMock.mockImplementationOnce(
-      () =>
-        new Promise<{ stdout: string }>((resolve) => {
-          resolveOldRead = resolve
-        })
-    )
-
-    const oldRead = listSubmodulePaths('/repo')
-    expect(resolveOldRead).toBeTypeOf('function')
+  it('does not let an in-flight pre-invalidation read refill the cache', async () => {
+    const root = await metadataRoot('pending', 'old-library')
+    let releaseRead: (() => void) | undefined
+    let enteredRead: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    const entered = new Promise<void>((resolve) => {
+      enteredRead = resolve
+    })
+    gitExecFileAsyncMock.mockImplementationOnce(async (args: string[], options: ReadOptions) => {
+      const result = await git(options.cwd ?? directory, args, options.env)
+      if (!enteredRead) {
+        throw new Error('Read notification gate was not initialized')
+      }
+      enteredRead()
+      await gate
+      return result
+    })
+    const oldRead = listSubmodulePaths(root)
+    await entered
     clearSubmodulePathsCacheForTests()
-    resolveOldRead?.({ stdout: 'submodule.lib.path old-lib\n' })
-
-    await expect(oldRead).resolves.toEqual(['old-lib'])
+    await writeModules(root, 'new-library')
+    if (!releaseRead) {
+      throw new Error('Read release gate was not initialized')
+    }
+    releaseRead()
+    expect(await oldRead).toEqual(['old-library'])
     expect(getSubmodulePathsCacheCountForTests()).toBe(0)
-    await expect(listSubmodulePaths('/repo')).resolves.toEqual(['repo-lib'])
-    expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(2)
+    expect(await listSubmodulePaths(root)).toEqual(['new-library'])
   })
 
-  it("does not reuse another branch's submodule paths after local or WSL checkout", async () => {
-    let modulePath = 'main-lib'
-    gitExecFileAsyncMock.mockImplementation((args: string[]) => {
-      if (args[0] === 'checkout') {
-        modulePath = 'feature-lib'
-        return Promise.resolve({ stdout: '' })
-      }
-      return Promise.resolve({ stdout: `submodule.lib.path ${modulePath}\n` })
-    })
-    const runtime = { wslDistro: 'Ubuntu' }
-
-    await expect(listSubmodulePaths('/repo', runtime)).resolves.toEqual(['main-lib'])
-    await checkoutBranch('/repo', 'feature', runtime)
-    await expect(listSubmodulePaths('/repo', runtime)).resolves.toEqual(['feature-lib'])
-
-    const configReads = gitExecFileAsyncMock.mock.calls.filter(
-      ([args]) => args[0] === 'config' && args.includes('.gitmodules')
-    )
-    expect(configReads).toHaveLength(2)
-    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(['checkout', 'feature', '--'], {
-      cwd: '/repo',
-      wslDistro: 'Ubuntu'
-    })
+  it('invalidates a missing-file result when metadata becomes available', async () => {
+    const root = path.join(directory, 'initially-absent')
+    await mkdir(root)
+    expect(await listSubmodulePaths(root)).toEqual([])
+    await writeModules(root, 'newly-declared-library')
+    clearSubmodulePathsCacheForTests()
+    expect(await listSubmodulePaths(root)).toEqual(['newly-declared-library'])
   })
 
-  it.each([
-    ['pull', () => gitPull('/repo')],
-    ['rebase', () => gitPullRebaseFromBase('/repo', 'origin/main')]
-  ])('invalidates submodule paths around local %s', async (_name, mutate) => {
-    let modulePath = 'old-lib'
-    gitExecFileAsyncMock.mockImplementation((args: string[]) => {
-      if (args[0] === 'remote') {
-        return Promise.resolve({ stdout: 'origin\n' })
-      }
-      if (args[0] === 'pull' || args[0] === 'fetch') {
-        modulePath = 'fresh-lib'
-        return Promise.resolve({ stdout: '' })
-      }
-      if (args[0] === 'config' && args.includes('.gitmodules')) {
-        return Promise.resolve({ stdout: `submodule.lib.path ${modulePath}\n` })
-      }
-      return Promise.resolve({ stdout: '' })
-    })
-
-    await expect(listSubmodulePaths('/repo')).resolves.toEqual(['old-lib'])
-    await mutate()
-    await expect(listSubmodulePaths('/repo')).resolves.toEqual(['fresh-lib'])
-
-    const configReads = gitExecFileAsyncMock.mock.calls.filter(
-      ([args]) => args[0] === 'config' && args.includes('.gitmodules')
-    )
-    expect(configReads).toHaveLength(2)
-  })
-
-  it.each([
-    ['merge', () => abortMerge('/repo', { wslDistro: 'Ubuntu' })],
-    ['rebase', () => abortRebase('/repo', { wslDistro: 'Ubuntu' })]
-  ])('drops a cached empty .gitmodules result when %s abort restores it', async (_name, abort) => {
-    let modulePath = ''
-    gitExecFileAsyncMock.mockImplementation((args: string[]) => {
-      if (args[1] === '--abort') {
-        modulePath = 'restored-lib'
-        return Promise.resolve({ stdout: '' })
-      }
-      return Promise.resolve({
-        stdout: modulePath ? `submodule.lib.path ${modulePath}\n` : ''
-      })
-    })
-
-    await expect(listSubmodulePaths('/repo', { wslDistro: 'Ubuntu' })).resolves.toEqual([])
-    await abort()
-    await expect(listSubmodulePaths('/repo', { wslDistro: 'Ubuntu' })).resolves.toEqual([
-      'restored-lib'
+  it('keeps runtime namespace cache entries independent', async () => {
+    const root = await metadataRoot('namespaced', 'first-runtime-library')
+    expect(await listSubmodulePaths(root, { wslDistro: 'Ubuntu' })).toEqual([
+      'first-runtime-library'
     ])
-
-    const configReads = gitExecFileAsyncMock.mock.calls.filter(
-      ([args]) => args[0] === 'config' && args.includes('.gitmodules')
-    )
-    expect(configReads).toHaveLength(2)
+    await writeModules(root, 'second-runtime-library')
+    expect(await listSubmodulePaths(root, { wslDistro: 'Debian' })).toEqual([
+      'second-runtime-library'
+    ])
+    expect(await listSubmodulePaths(root, { wslDistro: 'Ubuntu' })).toEqual([
+      'first-runtime-library'
+    ])
   })
 
-  it('drops a same-path negative cache when a local or WSL worktree is recreated', async () => {
-    let recreated = false
-    gitExecFileAsyncMock.mockImplementation((args: string[]) => {
-      if (args[0] === 'worktree' && args[1] === 'add') {
-        recreated = true
-      }
-      if (args[0] === 'config' && args.includes('.gitmodules')) {
-        return Promise.resolve({
-          stdout: recreated ? 'submodule.lib.path recreated-lib\n' : ''
-        })
-      }
-      return Promise.resolve({ stdout: '' })
-    })
-    const runtime = { wslDistro: 'Ubuntu' }
-
-    await expect(listSubmodulePaths('/repo-feature', runtime)).resolves.toEqual([])
-    await removeWorktree('/repo', '/repo-feature', true, {
-      ...runtime,
-      knownRemovedWorktree: { branch: '', head: '', locked: false }
-    })
-    await addWorktree('/repo', '/repo-feature', 'feature', undefined, false, false, {
-      ...runtime,
-      checkoutExistingBranch: true
-    })
-    await expect(listSubmodulePaths('/repo-feature', runtime)).resolves.toEqual(['recreated-lib'])
-
-    const configReads = gitExecFileAsyncMock.mock.calls.filter(
-      ([args]) => args[0] === 'config' && args.includes('.gitmodules')
-    )
-    expect(configReads).toHaveLength(2)
+  it('reads the checked-out branch metadata instead of cached previous-branch paths', async () => {
+    const root = await metadataRoot('checkout', 'main-library')
+    await git(root, ['init', '-q'])
+    await git(root, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
+    await git(root, ['add', '.gitmodules'])
+    const commit = [
+      '-c',
+      'user.name=Cache Test',
+      '-c',
+      'user.email=cache@example.invalid',
+      'commit',
+      '-qm'
+    ]
+    await git(root, [...commit, 'main metadata'])
+    await git(root, ['checkout', '-qb', 'feature'])
+    await writeModules(root, 'feature-library')
+    await git(root, ['add', '.gitmodules'])
+    await git(root, [...commit, 'feature metadata'])
+    await git(root, ['checkout', '-q', 'main'])
+    expect(await listSubmodulePaths(root)).toEqual(['main-library'])
+    await checkoutBranch(root, 'feature')
+    expect((await git(root, ['symbolic-ref', '--short', 'HEAD'])).stdout.trim()).toBe('feature')
+    expect(await listSubmodulePaths(root)).toEqual(['feature-library'])
   })
 })

@@ -48,7 +48,7 @@ async function runCheckout(
   branch: string | undefined,
   options: GetStatusOptions
 ): Promise<void> {
-  await gitExecFileAsync(args, {
+  await gitExecFileAsync(['-c', 'submodule.recurse=false', ...args], {
     ...gitOptionsForWorktree(workspace.context.checkoutPath, options),
     admissionTier: 'interactive',
     timeout: 120_000

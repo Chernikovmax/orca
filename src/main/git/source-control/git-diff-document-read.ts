@@ -16,7 +16,9 @@ import { buildDiffResult } from './diff-result'
 import { isBinaryBuffer } from '../../../shared/binary-buffer'
 import { readWorktreeDiffStamp } from './worktree-diff-stamp'
 import { PREVIEWABLE_BINARY_MIME_TYPES } from './previewable-binary-mime-types'
+import { isMaxBufferOverflowError } from '../max-buffer-overflow'
 import { issueGitSelection } from './git-selection-patch'
+import { readContentFence } from './git-content-fence'
 import { validateDiffPath } from './git-diff-path'
 
 export { validateDiffPath } from './git-diff-path'
@@ -60,7 +62,8 @@ async function readSide(
   cwd: string,
   filePath: string,
   source: GitDiffSide,
-  options: GetStatusOptions
+  options: GetStatusOptions,
+  indexRecords?: string
 ): Promise<DiffSideRead> {
   const info: GitDiffSideInfo = { source, path: filePath, exists: false }
   const empty = { info, content: '', binary: false }
@@ -115,7 +118,7 @@ async function readSide(
         if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) {
           throw new Error('Diff file changed identity while opening; refresh required')
         }
-        const buffer = Buffer.alloc(Math.min(stat.size + 1, CONTENT_LIMIT + 1))
+        const buffer = Buffer.allocUnsafe(Math.min(stat.size + 1, CONTENT_LIMIT + 1))
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
         if (bytesRead > CONTENT_LIMIT || bytesRead > stat.size) {
           return { ...empty, special: 'large' }
@@ -130,11 +133,12 @@ async function readSide(
   let record: string
   if (source.kind === 'index') {
     const records = (
-      await workspaceGitRead(
+      indexRecords ??
+      (await workspaceGitRead(
         cwd,
         ['ls-files', '--stage', '-z', '--', `:(literal)${filePath}`],
         options
-      )
+      ))
     )
       .split('\0')
       .filter(Boolean)
@@ -178,18 +182,20 @@ async function readSide(
   if (info.mode === '160000') {
     return empty
   }
-  const bytes = Number((await workspaceGitRead(cwd, ['cat-file', '-s', info.oid!], options)).trim())
-  info.bytes = bytes
-  if (!Number.isSafeInteger(bytes) || bytes > CONTENT_LIMIT) {
-    return { ...empty, special: 'large' }
+  try {
+    const { stdout } = await gitExecFileAsyncBuffer(['cat-file', 'blob', info.oid!], {
+      ...gitReadOptionsForWorktree(cwd, options),
+      env: { ...gitOptionalLocksDisabledEnv(), GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '' },
+      maxBuffer: CONTENT_LIMIT,
+      timeout: 15_000
+    })
+    return decodeSide(info, stdout)
+  } catch (error) {
+    if (isMaxBufferOverflowError(error)) {
+      return { ...empty, special: 'large' }
+    }
+    throw error
   }
-  const { stdout } = await gitExecFileAsyncBuffer(['cat-file', 'blob', info.oid!], {
-    ...gitReadOptionsForWorktree(cwd, options),
-    env: { ...gitOptionalLocksDisabledEnv(), GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '' },
-    maxBuffer: CONTENT_LIMIT,
-    timeout: 15_000
-  })
-  return decodeSide(info, stdout)
 }
 
 export async function readFileDiffDocument(
@@ -206,10 +212,33 @@ export async function readFileDiffDocument(
     selection.left.kind === 'worktree' || selection.right.kind === 'worktree',
     options
   )
-  const [left, right] = await Promise.all([
-    readSide(cwd, oldPath, selection.left, options),
-    readSide(cwd, filePath, selection.right, options)
-  ])
+  let left: DiffSideRead
+  let right: DiffSideRead
+  let preparedFence: string | undefined
+  if (
+    selection.left.kind === 'index' &&
+    selection.right.kind === 'worktree' &&
+    oldPath === filePath
+  ) {
+    right = await readSide(cwd, filePath, selection.right, options)
+    let indexRecords: string | undefined
+    if (
+      !right.binary &&
+      !right.special &&
+      right.info.mode !== '120000' &&
+      right.info.mode !== '160000'
+    ) {
+      const captured = { records: '' }
+      preparedFence = await readContentFence(cwd, { filePath }, options, captured)
+      indexRecords = captured.records
+    }
+    left = await readSide(cwd, oldPath, selection.left, options, indexRecords)
+  } else {
+    ;[left, right] = await Promise.all([
+      readSide(cwd, oldPath, selection.left, options),
+      readSide(cwd, filePath, selection.right, options)
+    ])
+  }
   const after = await readWorktreeDiffStamp(
     cwd,
     filePath,
@@ -243,6 +272,6 @@ export async function readFileDiffDocument(
       stale: !before || !after || before.value !== after.value
     }
   }
-  await issueGitSelection(cwd, filePath, selection, documentResult, options)
+  await issueGitSelection(cwd, filePath, selection, documentResult, options, preparedFence)
   return documentResult
 }

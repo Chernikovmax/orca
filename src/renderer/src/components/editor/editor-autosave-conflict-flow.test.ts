@@ -56,6 +56,32 @@ describe('editor autosave changed-on-disk conflict flow', () => {
     __clearSelfWriteRegistryForTests()
   })
 
+  it('keeps resolver drafts out of filesystem autosave and explicit filesystem save', async () => {
+    const disk = stubEditorWindowWithDisk(
+      createFakeEditorDisk({ '/repo/file.ts': 'reviewed worktree' })
+    )
+    const store = createEditorStore()
+    openDirtyFile(store, 'resolver draft must use git.mutate')
+    store.setState((state) => ({
+      openFiles: state.openFiles.map((file) => ({
+        ...file,
+        gitConflict: { rootPath: '/repo', contextId: 'reviewed-context' }
+      }))
+    }))
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store, disk))
+    try {
+      await vi.advanceTimersByTimeAsync(1500)
+      await expect(requestEditorFileSave({ fileId: '/repo/file.ts' })).rejects.toBeInstanceOf(Error)
+      expect(disk.files.get('/repo/file.ts')).toBe('reviewed worktree')
+      expect(store.getState().editorDrafts['/repo/file.ts']).toBe(
+        'resolver draft must use git.mutate'
+      )
+      expect(store.getState().openFiles[0]?.isDirty).toBe(true)
+    } finally {
+      cleanup()
+    }
+  })
+
   it('preserves dirty drafts and marks the tab changed-on-disk on external file change', () => {
     stubEditorWindow()
     const store = createEditorStore()

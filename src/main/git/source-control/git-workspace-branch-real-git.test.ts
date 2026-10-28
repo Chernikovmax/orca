@@ -129,6 +129,66 @@ async function checkoutState(
 }
 
 describe('workspace checkout and branch actions on real Git', () => {
+  it('previews and commits a healthy child without touching a blocked sibling or the parent index', async () => {
+    const fixture = await createGitWorkspaceFixture()
+    fixtures.push(fixture)
+    await writeFile(path.join(fixture.root, 'file.txt'), 'root staged\n')
+    await fixture.git(fixture.root, ['add', 'file.txt'])
+    await writeFile(path.join(fixture.one, 'file.txt'), 'healthy child staged\n')
+    await fixture.git(fixture.one, ['add', 'file.txt'])
+    await writeFile(
+      path.join(fixture.two, '.git'),
+      `gitdir: ${path.join(fixture.directory, 'outside-authority.git')}\n`
+    )
+    const rootBefore = await checkoutState(fixture, fixture.root)
+    const { repository } = await repositoryFor(fixture.root, fixture.one)
+    const preview = await mutate(fixture.root, repository, { action: 'previewCommit' })
+    if (!preview.preview || !('staged' in preview.preview)) {
+      throw new Error('Expected a commit preview')
+    }
+    expect(preview.preview.staged).toEqual([{ path: 'file.txt', status: 'modified' }])
+    const receipt = await mutateGitWorkspace(fixture.root, {
+      action: 'commit',
+      contextId: repository.context.id,
+      expectedState: repository.expectedState,
+      expectedHead: repository.head ?? '',
+      message: 'healthy child beside blocked sibling'
+    })
+    expect(receipt.outcome).toBe('succeeded')
+    expect(await fixture.git(fixture.one, ['show', 'HEAD:file.txt'])).toBe('healthy child staged')
+    expect(await fixture.git(fixture.one, ['diff', '--cached', '--name-only'])).toBe('')
+    expect(await checkoutState(fixture, fixture.root)).toEqual(rootBefore)
+  })
+
+  it('keeps child checkouts unchanged when root checkout has recursive Git configuration', async () => {
+    const fixture = await createGitWorkspaceFixture()
+    fixtures.push(fixture)
+    const childHead = await fixture.git(fixture.one, ['rev-parse', 'HEAD'])
+    await writeFile(path.join(fixture.one, 'pointer-target.txt'), 'child target\n')
+    await fixture.git(fixture.one, ['add', 'pointer-target.txt'])
+    await fixture.git(fixture.one, ['commit', '-qm', 'child target'])
+    await fixture.git(fixture.root, ['checkout', '-qb', 'pointer-target'])
+    await fixture.git(fixture.root, ['add', 'one'])
+    await fixture.git(fixture.root, ['commit', '-qm', 'root target pointer'])
+    const targetHead = await fixture.git(fixture.root, ['rev-parse', 'HEAD'])
+    await fixture.git(fixture.root, ['checkout', '-q', 'main'])
+    await fixture.git(fixture.one, ['checkout', '-qb', 'keep-child', childHead])
+    await fixture.git(fixture.root, ['config', 'submodule.recurse', 'true'])
+    const children = [fixture.one, fixture.two, fixture.nested]
+    const before = await Promise.all(children.map((cwd) => checkoutState(fixture, cwd)))
+    const { repository } = await repositoryFor(fixture.root, fixture.root)
+    expect(repository.entries).toEqual([])
+
+    const receipt = await mutate(fixture.root, repository, {
+      action: 'checkout',
+      refName: 'refs/heads/pointer-target'
+    })
+
+    expect(receipt.outcome).toBe('succeeded')
+    expect(await fixture.git(fixture.root, ['rev-parse', 'HEAD'])).toBe(targetHead)
+    expect(await Promise.all(children.map((cwd) => checkoutState(fixture, cwd)))).toEqual(before)
+  })
+
   it('checks out a local branch in only the selected submodule checkout', async () => {
     const { fixture } = await fixtureWithRemote()
     const before = await Promise.all(

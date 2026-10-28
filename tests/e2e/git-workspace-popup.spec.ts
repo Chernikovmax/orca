@@ -1,5 +1,6 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { runProcess } from '@orca/process-host'
 import { test, expect } from './helpers/orca-app'
 import { openGoldenSourceControl } from './helpers/golden-source-control'
 import { waitForSessionReady } from './helpers/store'
@@ -252,4 +253,66 @@ test('Git popup supports keyboard browsing, context-isolated refs and actual chi
       BrowserWindow.getAllWindows().some((window) => window.isVisible())
     )
   ).toBe(false)
+})
+
+test('a long repository picker scrolls to its last context and keeps keyboard selection inside the dialog', async ({
+  orcaPage: page,
+  registerPostElectronShutdownCleanup
+}) => {
+  const fixture = await createGitWorkspaceFixture()
+  registerPostElectronShutdownCleanup(() => rm(fixture.directory, { recursive: true, force: true }))
+  const oid = await fixture.git(fixture.one, ['rev-parse', 'HEAD'])
+  let modules = await readFile(path.join(fixture.root, '.gitmodules'), 'utf8')
+  let records = ''
+  for (let index = 0; index < 32; index++) {
+    const name = `unit-${String(index).padStart(3, '0')}`
+    modules += `\n[submodule "${name}"]\n\tpath = ${name}\n\turl = ${fixture.one}\n`
+    records += `160000 ${oid}\t${name}\n`
+  }
+  await writeFile(path.join(fixture.root, '.gitmodules'), modules)
+  const updated = await runProcess({
+    program: 'git',
+    args: ['update-index', '--index-info'],
+    cwd: fixture.root,
+    env: fixture.env,
+    input: records
+  })
+  expect(updated.code, updated.stderr).toBe(0)
+  const before = await fixture.git(fixture.root, ['ls-files', '--stage'])
+  await waitForSessionReady(page)
+  await page.evaluate(async (repoPath) => {
+    const result = await window.api.repos.add({ path: repoPath })
+    if ('error' in result) {
+      throw new Error(result.error)
+    }
+  }, fixture.root)
+  await openGoldenSourceControl(page, fixture.root, {
+    worktreePath: fixture.root,
+    branchName: 'main'
+  })
+  await page.keyboard.press('Control+Alt+KeyG')
+  const popup = page.getByTestId('git-workspace-popup')
+  const results = popup.getByRole('group', { name: 'Repository results' })
+  await expect(results.locator('[data-context-key]')).toHaveCount(36)
+  const last = results.locator('[data-context-key]').filter({ hasText: 'unit-031' })
+  await last.scrollIntoViewIfNeeded()
+  await expect(last).toBeInViewport()
+  await last.click()
+  await expect(
+    popup.getByRole('heading', { name: 'unit-031 · unit-031', exact: true })
+  ).toBeVisible()
+  await last.press('ArrowUp')
+  const previous = results.locator('[data-context-key]').filter({ hasText: 'unit-030' })
+  await expect(previous).toBeFocused()
+  const contained = await previous.evaluate((element) => {
+    const list = element.closest('[aria-label="Repository results"]')
+    if (!list) {
+      throw new Error('Repository results are missing')
+    }
+    const row = element.getBoundingClientRect()
+    const viewport = list.getBoundingClientRect()
+    return list.scrollTop > 0 && row.top >= viewport.top && row.bottom <= viewport.bottom
+  })
+  expect(contained).toBe(true)
+  expect(await fixture.git(fixture.root, ['ls-files', '--stage'])).toBe(before)
 })

@@ -1,8 +1,10 @@
+import { lstat } from 'node:fs/promises'
 import * as path from 'node:path'
 import type { GitRuntimeOptions } from '../git-runtime-options'
 import { gitOptionsForWorktree } from '../git-runtime-options'
 import { gitExecFileAsync, gitOptionalLocksDisabledEnv } from '../runner'
 import { gitRuntimeOptionsKey } from './git-runtime-options-cache-key'
+import { resolveWorktreeFilesystemPath } from './worktree-filesystem-path'
 
 const SUBMODULE_PATHS_CACHE_TTL_MS = 5_000
 export const MAX_SUBMODULE_PATHS_CACHE_ENTRIES = 512
@@ -67,6 +69,18 @@ function rememberSubmodulePaths(cacheKey: string, paths: string[], now: number):
   trimSubmodulePathsCache()
 }
 
+async function mayHaveGitmodules(
+  worktreePath: string,
+  options: GitRuntimeOptions
+): Promise<boolean> {
+  try {
+    await lstat(path.join(resolveWorktreeFilesystemPath(worktreePath, options), '.gitmodules'))
+    return true
+  } catch (error) {
+    return !(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
+  }
+}
+
 /**
  * Resolve a submodule's own worktree path from a parent worktree + relative
  * submodule path, rejecting anything that escapes the parent.
@@ -102,22 +116,24 @@ export async function listSubmodulePaths(
   const cacheGeneration = submodulePathsCacheGeneration
   let paths: string[] = []
   try {
-    const { stdout } = await gitExecFileAsync(
-      ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'],
-      { ...gitOptionsForWorktree(worktreePath, options), env: gitOptionalLocksDisabledEnv() }
-    )
-    paths = stdout
-      .split(/\r?\n/)
-      .map((line) => {
-        const spaceIndex = line.indexOf(' ')
-        return spaceIndex === -1
-          ? ''
-          : line
-              .slice(spaceIndex + 1)
-              .trim()
-              .replace(/\/+$/, '')
-      })
-      .filter((value) => value.length > 0)
+    if (await mayHaveGitmodules(worktreePath, options)) {
+      const { stdout } = await gitExecFileAsync(
+        ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'],
+        { ...gitOptionsForWorktree(worktreePath, options), env: gitOptionalLocksDisabledEnv() }
+      )
+      paths = stdout
+        .split(/\r?\n/)
+        .map((line) => {
+          const spaceIndex = line.indexOf(' ')
+          return spaceIndex === -1
+            ? ''
+            : line
+                .slice(spaceIndex + 1)
+                .trim()
+                .replace(/\/+$/, '')
+        })
+        .filter((value) => value.length > 0)
+    }
   } catch {
     // No .gitmodules (or git config failure) — treat as a repo without submodules.
     paths = []

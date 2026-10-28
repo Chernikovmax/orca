@@ -45,7 +45,7 @@ async function conflictFailure(
   const detail = safeGitMessage(error)
   return new GitMutationError(
     'conflict',
-    `${label} stopped with ${unresolved} unresolved conflict(s); it is not complete. Resolve the files and stage them, then continue — or abort. Orca's conflict resolver is a later stage.\n${detail}`
+    `${label} stopped with ${unresolved} unresolved conflict(s); it is not complete. Save the result and explicitly mark each conflict resolved, then continue — or abort.\n${detail}`
   )
 }
 
@@ -167,18 +167,17 @@ export async function continueOperationImpl(
 ): Promise<GitMutationReceipt> {
   const state = await currentOperation(workspace, options)
   if (!state.inProgress) {
-    throw new GitMutationError('invalid', 'No merge or rebase is in progress')
+    throw new GitMutationError('invalid', 'No merge, rebase or cherry-pick is in progress')
   }
-  if (state.operation === 'cherry-pick') {
-    throw new GitMutationError(
-      'unsupported',
-      'A cherry-pick is in progress; conflict resolution for cherry-pick is not part of this stage'
-    )
-  }
-  if (state.operation !== 'merge' && state.operation !== 'rebase') {
+  if (
+    state.operation !== 'merge' &&
+    state.operation !== 'rebase' &&
+    state.operation !== 'cherry-pick'
+  ) {
     throw new GitMutationError('unsupported', 'The unfinished Git operation is not supported')
   }
-  const label = state.operation === 'merge' ? 'Merge' : 'Rebase'
+  const label =
+    state.operation === 'merge' ? 'Merge' : state.operation === 'rebase' ? 'Rebase' : 'Cherry-pick'
   try {
     await gitExecFileAsync(
       ['-c', 'core.editor=true', state.operation, '--continue'],
@@ -214,15 +213,13 @@ export async function abortOperationImpl(
 ): Promise<GitMutationReceipt> {
   const state = await currentOperation(workspace, options)
   if (!state.inProgress) {
-    throw new GitMutationError('invalid', 'No merge or rebase is in progress')
+    throw new GitMutationError('invalid', 'No merge, rebase or cherry-pick is in progress')
   }
-  if (state.operation === 'cherry-pick') {
-    throw new GitMutationError(
-      'unsupported',
-      'A cherry-pick is in progress; aborting it is not part of this stage'
-    )
-  }
-  if (state.operation !== 'merge' && state.operation !== 'rebase') {
+  if (
+    state.operation !== 'merge' &&
+    state.operation !== 'rebase' &&
+    state.operation !== 'cherry-pick'
+  ) {
     throw new GitMutationError('unsupported', 'The unfinished Git operation is not supported')
   }
   await gitExecFileAsync([state.operation, '--abort'], integrationOptions(workspace, options))

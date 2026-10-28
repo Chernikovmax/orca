@@ -22,9 +22,9 @@ export type ContentFenceEntry =
       identity?: { dev: number; ino: number; mtimeMs: number; ctimeMs: number }
     }
 
-async function hashHandle(handle: FileHandle): Promise<string> {
+async function hashHandle(handle: FileHandle, size: number): Promise<string> {
   const hash = createHash('sha256')
-  const buffer = Buffer.alloc(CHUNK)
+  const buffer = Buffer.allocUnsafe(Math.min(CHUNK, size + 1))
   let position = 0
   for (;;) {
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, position)
@@ -91,7 +91,7 @@ export async function readContentFenceEntry(
       if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino) {
         throw new Error('File changed identity while reading its fingerprint; refresh required')
       }
-      return { kind: 'file', mode, size: info.size, digest: await hashHandle(handle) }
+      return { kind: 'file', mode, size: info.size, digest: await hashHandle(handle, opened.size) }
     } finally {
       await handle.close()
     }
@@ -107,7 +107,8 @@ export async function readContentFenceEntry(
 export async function readContentFence(
   cwd: string,
   paths: { filePath: string; oldPath?: string },
-  options: GetStatusOptions
+  options: GetStatusOptions,
+  captureIndex?: { records: string }
 ): Promise<string> {
   const filePath = validateDiffPath(paths.filePath)
   const oldPath = validateDiffPath(paths.oldPath ?? filePath)
@@ -124,6 +125,9 @@ export async function readContentFence(
     ),
     Promise.all(unique.map((item) => readContentFenceEntry(cwd, item, options)))
   ])
+  if (captureIndex) {
+    captureIndex.records = records
+  }
   const indexRecords = records
     .split('\0')
     .filter(Boolean)
@@ -132,8 +136,13 @@ export async function readContentFence(
       const metadata = record.slice(0, tab).split(' ')
       return { metadata, path: record.slice(tab + 1) }
     })
-    .sort((a, b) => a.path.localeCompare(b.path) || a.metadata.join(' ').localeCompare(b.metadata.join(' ')))
+    .sort(
+      (a, b) =>
+        a.path.localeCompare(b.path) || a.metadata.join(' ').localeCompare(b.metadata.join(' '))
+    )
   return createHash('sha256')
-    .update(JSON.stringify([head, indexRecords, unique.map((item, index) => [item, entries[index]])]))
+    .update(
+      JSON.stringify([head, indexRecords, unique.map((item, index) => [item, entries[index]])])
+    )
     .digest('hex')
 }

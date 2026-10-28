@@ -1,3 +1,4 @@
+import type { GitConflictResolution, GitWorkspaceConflictDocument } from './git-workspace-conflict'
 import type {
   GitWorkspaceBatchPreview,
   GitWorkspaceBatchReceipt,
@@ -25,6 +26,9 @@ export type GitMutationAction =
   | 'rebase'
   | 'continueOperation'
   | 'abortOperation'
+  | 'readConflict'
+  | 'saveConflict'
+  | 'resolveConflict'
   | 'previewSubmoduleInitialize'
   | 'submoduleInitialize'
   | 'previewSubmoduleCheckout'
@@ -115,6 +119,8 @@ export type GitWorkspaceMutationRequest = {
   /** Old path of a rename; file-level operations act on both paths. */
   oldPath?: string
   documentId?: string
+  content?: string
+  resolution?: GitConflictResolution
   hunkIds?: string[]
   lineIds?: string[]
   /** Full child commit OID the parent gitlink should record. */
@@ -166,8 +172,6 @@ export type GitSubmoduleLifecyclePreview = {
   changes: string[]
   warning?: string
 }
-
-
 
 export type GitMutationErrorCategory =
   | 'stale'
@@ -243,11 +247,16 @@ export type GitMutationReceipt = {
   error?: string
   errorCategory?: GitMutationErrorCategory
   recovery?: GitRecoveryEntry
-  preview?: GitCommitPreview | GitDiscardPreview | GitSubmoduleLifecyclePreview | GitWorkspaceBatchPreview
+  preview?:
+    | GitCommitPreview
+    | GitDiscardPreview
+    | GitSubmoduleLifecyclePreview
+    | GitWorkspaceBatchPreview
   recoveries?: GitRecoveryEntry[]
   commit?: { head: string; summary: string }
   operation?: GitWorkspaceOperationReceipt
   batch?: GitWorkspaceBatchReceipt
+  conflict?: GitWorkspaceConflictDocument
 }
 
 export type GitSelectableLine = {

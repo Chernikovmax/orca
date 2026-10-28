@@ -196,7 +196,13 @@ async function runGetStatus(
     if (options.signal?.aborted || workspaceRead) {
       throw error
     }
-    // Not a git repo or git not available
+    if (lineStatsWriteToken !== null) {
+      clearGitStatusLineStatsCacheKey(lineStatsCacheKey, lineStatsWriteToken)
+    }
+    // A broken child must not turn healthy root files into a clean status.
+    return getWorkspaceStatus(worktreePath, options, (cwd, readOptions) =>
+      runGetStatus(cwd, readOptions, true)
+    )
   }
 
   let entries: GitStatusEntry[] = []

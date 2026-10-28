@@ -66,6 +66,8 @@ export type OpenFile = {
   /** Why: snapshot uncommitted entries at tab-open so a later commit can't yank them out from under the combined diff (rebuild + lost scroll). */
   uncommittedEntriesSnapshot?: GitStatusEntry[]
   conflict?: OpenConflictMetadata
+  /** Host-backed resolver identity; its draft never enters filesystem autosave. */
+  gitConflict?: { contextId?: string; rootPath: string }
   skippedConflicts?: CombinedDiffSkippedConflict[]
   conflictReview?: ConflictReviewState
   isPreview?: boolean // preview tabs are replaced when another file is single-clicked

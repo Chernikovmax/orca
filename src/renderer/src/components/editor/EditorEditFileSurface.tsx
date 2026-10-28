@@ -7,6 +7,7 @@ import { ChangesModeView } from './ChangesModeView'
 import { ConflictBanner, ConflictPlaceholderView } from './ConflictComponents'
 import {
   CsvViewer,
+  GitConflictResolver,
   CsvPagedViewer,
   ImageViewer,
   IpynbViewer,
@@ -93,6 +94,9 @@ export function EditorEditFileSurface({
   handleSave: (content: string) => Promise<boolean>
   reloadContent: (file: OpenFile) => void
 }): React.JSX.Element {
+  if (activeFile.gitConflict || activeFile.conflict?.conflictStatus === 'unresolved') {
+    return <GitConflictResolver key={activeFile.id} file={activeFile} />
+  }
   if (activeFile.conflict?.kind === 'conflict-placeholder') {
     return <ConflictPlaceholderView file={activeFile} />
   }
@@ -230,7 +234,6 @@ export function EditorEditFileSurface({
         }
         worktreeId={activeFile.worktreeId}
         markdownAnnotationsEnabled={markdownAnnotationsEnabled && isMarkdown}
-        conflictDecorationsEnabled={activeFile.conflict?.conflictStatus === 'unresolved'}
         revealLine={
           matchesPendingEditorReveal(pendingEditorReveal, activeFile, viewStateScopeId)
             ? pendingEditorReveal.line

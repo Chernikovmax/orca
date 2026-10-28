@@ -10,6 +10,7 @@ import type { RepositoryState, SubmoduleEntry } from '../../../../../../shared/g
 import type { RuntimeGitContext } from '@/runtime/runtime-git-client-context'
 import { WorkspaceChangesList } from './workspace-changes-list'
 import { useWorkspaceMutations } from './use-workspace-mutations'
+import { WorkspaceConflictOperation } from './workspace-conflict-operation'
 
 export type WorkspaceChangesProps = {
   repository: RepositoryState
@@ -93,6 +94,28 @@ export function SourceControlWorkspaceChanges({
       return
     }
     update({ selected: keyOf(entry) })
+    if (entry.conflictStatus === 'unresolved') {
+      useAppStore
+        .getState()
+        .openConflictFile(
+          context.worktreeId,
+          repository.context.checkoutPath,
+          entry,
+          detectLanguage(entry.path),
+          {
+            preview: false,
+            gitDiffRootPath: context.worktreePath,
+            runtimeEnvironmentId:
+              context.target.kind === 'environment' ? context.target.environmentId : undefined,
+            gitDiffSelection: {
+              contextId: id,
+              left: { kind: 'index' },
+              right: { kind: 'worktree' }
+            }
+          }
+        )
+      return
+    }
     useAppStore
       .getState()
       .openDiff(
@@ -164,15 +187,11 @@ export function SourceControlWorkspaceChanges({
         <p role="status">The change listing is truncated by the host limit.</p>
       )}
       {repository.operationInProgress && (
-        <p aria-live="polite" data-testid="git-changes-operation">
-          {repository.conflictOperation === 'unknown'
-            ? 'A Git operation'
-            : `A ${repository.conflictOperation}`}{' '}
-          is unfinished ·{' '}
-          {repository.entries.filter((entry) => entry.conflictStatus === 'unresolved').length}{' '}
-          unresolved conflict file(s). Continue or Abort from the branch menu (Ctrl+Alt+G); the
-          result is not complete until Git finishes.
-        </p>
+        <WorkspaceConflictOperation
+          repository={repository}
+          context={context}
+          onRefresh={onRefresh}
+        />
       )}
       {mutations.notice && (
         <p

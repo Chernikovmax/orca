@@ -1,6 +1,6 @@
 # Git Workspace для Orca
 
-Статус: этапы 0–7 реализованы на официальном checkout; host-авторизованный Git-каталог, Changes/diff, popup контекстов/refs, частичный stage/unstage, commit/discard, история и ветки/remotes/merge/rebase используют существующие status, editor и transport. Этап 7 добавляет явное обслуживание сабмодулей и dependency-safe пакеты commit/publish. Остальные разделы описывают также целевую архитектуру этапов 8–9, которые не начаты. Порядок задаёт PLAN.md; доказательства — STAGE1–STAGE7-REPORT.md. По указанию пользователя после этапа 7 правки останавливаются до согласованной публикации и отдельного разрешения продолжить.
+Статус: этапы 0–9 реализованы и прошли описанную локальную приёмку на официальном checkout. Git-каталог, Changes/diff, popup, частичные операции, история, ветки/remotes, обслуживание сабмодулей, пакеты commit/publish и contextual conflict resolver используют существующие host authority, editor и transport. Performance budgets этапа 0 выполнены; это не доказательство live-поддержки всех execution hosts. Пользователь опубликовал этапы 1–7 коммитом `60503340e85a532d56791769f6854d32a921c695` и после завершения проверок отдельно разрешил commit/push готовых этапов 8–9 в текущую ветку форка `Chernikovmax/orca`. Порядок — PLAN.md; доказательства — STAGE1–STAGE9-REPORT.md.
 
 ## Цель
 
@@ -32,9 +32,31 @@ Batch строится из явного выбора контекстов/ре�
 
 Проверка: 306 passed в 19 файлах финального последовательного Vitest-прогона, включая 15 lifecycle и 6 batch real-Git сценариев. Настоящий скрытый Electron: 14 выбранных сценариев прошли тремя последовательными группами, пять из них новые для этапа 7; сборка boot graph — 176 chunks / 6062.0 KB minified. Проверены local macOS arm64, временные настоящие Git-репозитории/local bare remotes и loopback HTTP. SSH/WSL/Windows, release packaging и весь набор репозитория не проверялись. Подробности — STAGE7-REPORT.md.
 
+### Реализованный срез этапа 8
+
+`git.mutate` получил `readConflict`, `saveConflict`, `resolveConflict` и отдельный `GitWorkspaceConflictDocument`. Host читает реальные index stages 1/2/3 и result офлайн; содержимое ограничено 8 MiB на сторону, бинарные bytes не декодируются с потерями. Private documents ограничены 32 записями/64 MiB/15 минутами. Перед записью проверяются host-issued context, checkout identity, HEAD/operation markers, index OID/mode/stages и точные worktree bytes/mode/absence; очередь остаётся общей для common Git directory.
+
+Существующий editor и conflict review показывают один resolver: read-only base/ours/theirs, editable Monaco result, блоковые choices и навигация. Save пишет только worktree, возвращая новый token; Mark Resolved отдельно записывает stage 0 или явное удаление. Generic filesystem save/autosave не обходит этот путь. Черновики разделены по owner/worktree/absolute path; stale write блокируется, explicit Reload сохраняет предыдущую несохранённую версию для восстановления.
+
+Add/add, modify/delete, rename-associated paths, binary/symlink и gitlink представлены явно. Whole-side choice сохраняет bytes/mode, edited result учитывает `.gitattributes` normalization. Gitlink показывает оба child OID, открывает существующие child Changes/branch/commit и записывает явно выбранный локально проверенный commit только в parent index. Незакоммиченные невыбранные child files остаются нетронутыми. Merge/rebase/cherry-pick continue/abort проверяют реальные markers; rebase sides подписаны в реальной stage-семантике.
+
+Проверка этапа 8: 233 passed в 27 выбранных host/editor/transport файлах, включая 13 conflict real-Git сценариев; 4 новых hidden Electron journeys прошли одним последовательным прогоном. E2E build: 176 chunks / 6062.4 KB minified. На реальных данных воспроизведены и исправлены ошибки CRLF index normalization и несовместимости legacy conflict-metadata guard с contextual opening. Проверены local macOS arm64 и изолированные временные Git fixture; remote/Windows runtime и release package не заявляются проверенными. См. STAGE8-REPORT.md.
+
+### Сквозная приёмка и hardening этапа 9
+
+Ошибочный legacy root porcelain переходит к тому же безопасному workspace reader, сохраняя реальные root entries и явные discovery errors вместо ложного clean. Preview/write и HEAD fencing проверяют полноту выбранного repository; unavailable sibling не блокирует здоровый child commit. Lifecycle и dependency batch сохраняют свои более широкие completeness guards.
+
+Checkout/New Branch принудительно отключают Git submodule recursion, чтобы пользовательский `submodule.recurse=true` не менял HEAD/branch/index невыбранного ребёнка. Conflict writer отказывает при нескольких hard links до truncate. Resolved document перечитывается при повторном открытии; inactive clean renderer cache освобождается без потери unsaved/recovery данных. Длинный popup ограничен grid track и собственными scroll regions, без clipping вместо решения sizing.
+
+Uncached diff не читает неиспользуемый status/upstream для unstaged, не запускает отдельный blob-size probe и не вызывает config для действительно отсутствующего `.gitmodules`. Read buffers ограничены нужным размером, обрабатываются только инициализированные bytesRead. Для обычного index→worktree staging pre-patch fence отдаёт те же index records displayed base; после Git patch сохраняется полная fresh HEAD/index/content проверка. Изменение index во время blob read даёт stale без writable token. Racy-write cache margin не ослаблен.
+
+Проверка: 524 passed / 46 файлов и 49 passed / 7 cache/stamp файлов (573 / 53, два последовательных прогона), Node/Web TypeScript/catalog/lint exit 0. Настоящие hidden Electron группы покрывают прежние 14 journeys, 4 conflict journeys, watcher/draft recovery и длинный popup; после последнего producer повторены IPC/fresh-host/CLI и root/child partial-stage flow. В полном каталоге 129 строк/25 hover дали 0 Git starts; история 323 commit прошла 7 страниц с 43–44 DOM строками. Финальные latency/memory значения, ранние отказы и неизменённые budgets — STAGE9-REPORT.md.
+
+Live inventory: только local host, environments отсутствуют. Remote disconnect/unknown outcome подтверждён loopback HTTP, не live SSH/WSL/Windows. CLI smoke использует текущие source handlers и настоящий RuntimeClient socket, не packaged executable. Release package, другие платформы и весь repository suite не заявляются проверенными. Worker завершён без оставшихся изменений; own fixtures/scripts удалены, raw evidence оставлен в ignored cache. Source commit/push разрешён последующим прямым указанием пользователя; временные данные не включаются.
+
 ### Карта переиспользования
 
-Все пути ниже относительно `orca/`; названия в следующих проектных разделах ещё не являются новыми API.
+Все пути ниже относительно корня checkout Orca (во внешней папке проекта это `orca/`); исторические описания этапа 0 не объявляют тогдашние отсутствовавшие функции реализованными.
 
 | Область | Реальные точки и потребители | Решение |
 |---|---|---|

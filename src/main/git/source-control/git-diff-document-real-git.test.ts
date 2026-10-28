@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createGitWorkspaceFixture, type GitWorkspaceFixture } from './git-workspace-test-fixture'
@@ -6,6 +6,7 @@ import { getDiff } from './file-diff'
 import { getStatus } from './status-read'
 import { getCommitDiff } from './commit-diff'
 import { getBranchDiff } from './branch-diff'
+import * as runner from '../runner'
 
 describe('Git diff documents at the real repository boundary', () => {
   let fixture: GitWorkspaceFixture
@@ -24,6 +25,54 @@ describe('Git diff documents at the real repository boundary', () => {
   afterEach(async () => {
     vi.unstubAllEnvs()
     await rm(fixture.directory, { recursive: true, force: true })
+  })
+
+  it('does not issue writable selections when an external writer changes the index during the blob read', async () => {
+    await writeFile(path.join(fixture.root, 'file.txt'), 'shown working bytes\n')
+    const stagedPath = path.join(fixture.directory, 'external-index.txt')
+    await writeFile(stagedPath, 'external staged bytes\n')
+    const oid = await fixture.git(fixture.root, ['hash-object', '-w', stagedPath])
+    const readBlob = runner.gitExecFileAsyncBuffer
+    let changed = false
+    const intercepted = vi
+      .spyOn(runner, 'gitExecFileAsyncBuffer')
+      .mockImplementation(async (args, options) => {
+        const result = await readBlob(args, options)
+        if (!changed && args[0] === 'cat-file') {
+          changed = true
+          await fixture.git(fixture.root, ['update-index', '--cacheinfo', `100644,${oid},file.txt`])
+        }
+        return result
+      })
+    try {
+      const diff = await getDiff(fixture.root, 'file.txt', false)
+      expect(diff.document?.stale).toBe(true)
+      expect(diff.document?.id).toBeUndefined()
+      expect(await fixture.git(fixture.root, ['show', ':file.txt'])).toBe('external staged bytes')
+      expect(await readFile(path.join(fixture.root, 'file.txt'), 'utf8')).toBe(
+        'shown working bytes\n'
+      )
+    } finally {
+      intercepted.mockRestore()
+    }
+  })
+
+  it('reads a staged blob at the content limit and withholds one byte above it', async () => {
+    const limit = 8 * 1024 * 1024
+    const filePath = path.join(fixture.root, 'limit.bin')
+    await writeFile(filePath, Buffer.alloc(limit))
+    await fixture.git(fixture.root, ['add', 'limit.bin'])
+    expect(await getDiff(fixture.root, 'limit.bin', true)).toMatchObject({
+      kind: 'binary',
+      document: { right: { bytes: limit, exists: true } }
+    })
+
+    await appendFile(filePath, Buffer.from([0]))
+    await fixture.git(fixture.root, ['add', 'limit.bin'])
+    expect(await getDiff(fixture.root, 'limit.bin', true)).toMatchObject({
+      modifiedContent: '',
+      document: { special: 'large' }
+    })
   })
 
   it('compares both rename paths and keeps index separate from worktree in a child context', async () => {

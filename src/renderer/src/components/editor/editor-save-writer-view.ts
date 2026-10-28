@@ -18,7 +18,12 @@ function hasCurrentProvenance(state: AppState, file: OpenFile): boolean {
 }
 
 export function isEditorWritableView(view: OpenFile): boolean {
-  return view.readOnly !== true && view.csvPreviewOnly !== true
+  return (
+    view.readOnly !== true &&
+    view.csvPreviewOnly !== true &&
+    !view.gitConflict &&
+    view.conflict?.conflictStatus !== 'unresolved'
+  )
 }
 
 /** The first open view of `viewIds` a save of `trigger` may write through, on a current owner. */

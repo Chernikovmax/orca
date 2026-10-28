@@ -99,9 +99,13 @@ export function isExternalReloadableEditorTab(file: OpenFile): boolean {
 }
 
 export function canAutoSaveOpenFile(file: OpenFile): boolean {
-  // Why: read-only tabs (AI Vault View Log) must never autosave — writing an
-  // agent-owned transcript can corrupt the provider's resume history.
-  if (file.readOnly === true || file.csvPreviewOnly === true) {
+  // Why: resolver saves require git.mutate fences; previews and read-only artifacts cannot autosave.
+  if (
+    file.readOnly === true ||
+    file.csvPreviewOnly === true ||
+    file.gitConflict ||
+    file.conflict?.conflictStatus === 'unresolved'
+  ) {
     return false
   }
   // Why: single-file editors and one-file unstaged diffs have an unambiguous

@@ -5,13 +5,7 @@ import type {
 import type { GetStatusOptions } from './get-status-options'
 import { verifyWorkspaceContext } from './git-workspace-context'
 import { validateDiffPath } from './git-diff-path'
-import {
-  assertIssuedSelectionFresh,
-  getIssuedGitSelection,
-  selectedGitPatch
-} from './git-selection-patch'
 import { withGitMutationQueue } from './git-mutation-queue'
-import { stageFile, unstageFile } from './staging'
 import { discardChanges } from './discard-changes'
 import { invalidateGitReadCaches } from './git-read-cache-invalidation'
 import {
@@ -21,12 +15,10 @@ import {
   isUnknownOutcome
 } from './git-workspace-mutation-error'
 import {
-  applySelectedPatch,
   readAuthorizedWorkspace,
   readFreshState,
   refreshReceipt,
-  submoduleForPath,
-  type ResolvedWorkspace
+  submoduleForPath
 } from './git-workspace-mutation-shared'
 import { discardImpl, previewDiscardImpl } from './git-workspace-mutation-discard'
 import { listRecoveriesImpl, restoreDiscardImpl } from './git-workspace-mutation-recovery'
@@ -43,6 +35,9 @@ import {
 import { mutateGitWorkspaceBatch } from './git-workspace-batch-mutation'
 import { previewSubmoduleLifecycle } from './git-workspace-submodule-preview'
 import { applySubmoduleLifecycle } from './git-workspace-submodule-apply'
+import { readConflictImpl } from './git-workspace-conflict-read'
+import { saveConflictImpl, resolveConflictImpl } from './git-workspace-conflict-write'
+import { stageOrUnstage } from './git-workspace-mutation-stage'
 
 const HEAD_FENCED_ACTION: Record<string, true> = {
   checkout: true,
@@ -51,62 +46,6 @@ const HEAD_FENCED_ACTION: Record<string, true> = {
   rebase: true,
   continueOperation: true,
   abortOperation: true
-}
-
-async function stageOrUnstage(
-  resolved: ResolvedWorkspace,
-  request: GitWorkspaceMutationRequest,
-  options: GetStatusOptions
-): Promise<GitMutationReceipt> {
-  const filePath = validateDiffPath(request.filePath ?? '')
-  const oldPath =
-    request.oldPath && request.oldPath !== filePath ? validateDiffPath(request.oldPath) : undefined
-  for (const candidate of oldPath ? [oldPath, filePath] : [filePath]) {
-    if (submoduleForPath(resolved.workspace, resolved.context, candidate)) {
-      throw new GitMutationError(
-        'unsupported',
-        'This path is a submodule gitlink; stage it explicitly with the reviewed child commit'
-      )
-    }
-  }
-  const applyFiles = async (): Promise<void> => {
-    for (const candidate of oldPath ? [oldPath, filePath] : [filePath]) {
-      const gitOptions = { ...options, admissionTier: 'interactive' as const }
-      await (request.action === 'stage'
-        ? stageFile(resolved.context.checkoutPath, candidate, gitOptions)
-        : unstageFile(resolved.context.checkoutPath, candidate, gitOptions))
-    }
-  }
-  const partial = !!request.documentId || !!request.lineIds?.length || !!request.hunkIds?.length
-  if (!partial) {
-    await applyFiles()
-    return { action: request.action, outcome: 'succeeded' }
-  }
-  if (oldPath) {
-    throw new GitMutationError(
-      'unsupported',
-      'Partial changes are unavailable for a rename; stage or unstage the whole file'
-    )
-  }
-  const issued = getIssuedGitSelection(request.documentId)
-  if (
-    issued.cwd !== resolved.context.checkoutPath ||
-    issued.filePath !== filePath ||
-    (issued.contextId && issued.contextId !== resolved.context.id)
-  ) {
-    throw new GitMutationError('access-denied', 'Diff selection belongs to another context or path')
-  }
-  if (issued.direction !== request.action) {
-    throw new GitMutationError('invalid', 'Diff sides do not match this staging action')
-  }
-  await assertIssuedSelectionFresh(issued, options)
-  const selection = selectedGitPatch(issued, request)
-  if (selection.wholeFile) {
-    await applyFiles()
-  } else if (selection.patch) {
-    await applySelectedPatch(resolved.context, selection.patch, options)
-  }
-  return { action: request.action, outcome: 'succeeded' }
 }
 
 async function runWrite(
@@ -146,7 +85,7 @@ async function runWrite(
       }
     }
     if (HEAD_FENCED_ACTION[request.action] === true) {
-      if (resolved.repository.incomplete || resolved.workspace.incomplete) {
+      if (resolved.repository.incomplete) {
         throw new GitMutationError(
           'incomplete',
           'Git context discovery is incomplete; refresh and review the real state before writing'
@@ -166,6 +105,10 @@ async function runWrite(
       }
     }
     switch (request.action) {
+      case 'saveConflict':
+        return saveConflictImpl(resolved, request, options)
+      case 'resolveConflict':
+        return resolveConflictImpl(resolved, request, options)
       case 'stage':
       case 'unstage':
         return stageOrUnstage(resolved, request, options)
@@ -236,6 +179,14 @@ export async function mutateGitWorkspace(
     if (request.action === 'previewBatch' || request.action === 'runBatch') {
       started = request.action === 'runBatch' && request.batchRun?.inspectOnly !== true
       return await mutateGitWorkspaceBatch(root, request, options)
+    }
+    if (request.action === 'readConflict') {
+      const resolved = await readAuthorizedWorkspace(root, request, options)
+      const conflict = await readConflictImpl(resolved, request, options)
+      return refreshReceipt(
+        { action: request.action, outcome: 'succeeded', conflict },
+        resolved.repository
+      )
     }
     if (request.action === 'previewCommit') {
       const resolved = await readAuthorizedWorkspace(root, request, options)

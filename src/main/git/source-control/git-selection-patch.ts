@@ -5,11 +5,7 @@ import type { GitSelectableHunk, GitSelectableLine } from '../../../shared/git-w
 import type { GetStatusOptions } from './get-status-options'
 import { readContentFence } from './git-content-fence'
 import { GitMutationError } from './git-workspace-mutation-error'
-import {
-  ownershipDirection,
-  parsePatch,
-  readPatch
-} from './git-selection-patch-text'
+import { ownershipDirection, parsePatch, readPatch } from './git-selection-patch-text'
 import type { IssuedGitSelection, IssuedHunk, IssuedRow } from './git-selection-patch-types'
 
 export { selectedGitPatch } from './git-selection-patch-build'
@@ -28,7 +24,8 @@ export async function issueGitSelection(
   filePath: string,
   selection: GitDiffSelection,
   result: GitDiffResult,
-  options: GetStatusOptions
+  options: GetStatusOptions,
+  preparedFence?: string
 ): Promise<void> {
   const document = result.document
   if (!document || document.stale) {
@@ -48,7 +45,7 @@ export async function issueGitSelection(
       'Partial changes are unavailable for this representation; stage or unstage the whole file.'
     return
   }
-  const before = await readContentFence(cwd, { filePath }, options)
+  const before = preparedFence ?? (await readContentFence(cwd, { filePath }, options))
   const parsed = parsePatch(await readPatch(cwd, filePath, direction, result, options))
   const after = await readContentFence(cwd, { filePath }, options)
   if (before !== after) {

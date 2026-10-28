@@ -67,6 +67,7 @@ export function createOpenConflictReview(
                     relativePath: entry.path,
                     filePath: absolutePath,
                     conflict,
+                    gitConflict: { rootPath: worktreePath },
                     diffSource: undefined,
                     skippedConflicts: undefined,
                     conflictReview: undefined
@@ -102,6 +103,7 @@ export function createOpenConflictReview(
                 isDirty: false,
                 mode: 'edit' as const,
                 conflict,
+                gitConflict: { rootPath: worktreePath },
                 ...(runtimeEnvironmentId ? { runtimeEnvironmentId } : {})
               }
             ]

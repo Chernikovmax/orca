@@ -19,6 +19,9 @@ const GitMutationAction = z.enum([
   'rebase',
   'continueOperation',
   'abortOperation',
+  'readConflict',
+  'saveConflict',
+  'resolveConflict',
   'previewSubmoduleInitialize',
   'submoduleInitialize',
   'previewSubmoduleCheckout',
@@ -90,6 +93,11 @@ export const GitMutate = WorktreeSelector.extend({
     .optional(),
   oldPath: z.string().min(1).max(4096).optional(),
   documentId: z.string().max(256).optional(),
+  content: z
+    .string()
+    .max(8 * 1024 * 1024)
+    .optional(),
+  resolution: z.enum(['result', 'ours', 'theirs', 'delete', 'gitlink']).optional(),
   hunkIds: z.array(z.string().max(256)).max(20_000).optional(),
   lineIds: z.array(z.string().max(256)).max(20_000).optional(),
   childOid: z

@@ -41,3 +41,20 @@
 - Add refuses unrelated `.gitmodules` changes. Remove stages only the reviewed gitlink deletion and edits its worktree declaration, retaining checkout files, unpublished commits, local configuration and Git metadata; no force, cleanup or hidden stash is used.
 - Selected-context batches commit staged changes from leaves to root, pausing for the exact resulting child OID at every parent gitlink. Publication is child-first and checks real remote reachability plus the destination URL recorded in the published parent. Missing or unverifiable objects/remotes block the parent.
 - Per-step results and bounded, read-only progress inspection use the existing mutation transport. Every step rechecks dependencies without holding multiple repository queues. Only a known-failed step can be explicitly retried; completed and unknown operations are never automatically replayed.
+
+### Git Workspace — Contextual conflict resolver (stage 8)
+
+- Root and authorized submodule Changes now open one host-backed resolver in the existing editor, with base/ours/theirs, an editable Monaco result, per-block choices and conflict navigation. Existing conflict-review selections use the same surface.
+- Save writes only the worktree; Mark Resolved explicitly records the real index. Host-issued documents fence the index stages, operation, checkout and exact worktree state, rejecting external edits without overwriting retained context-isolated drafts. Generic filesystem save/autosave cannot bypass the resolver.
+- Merge, rebase and cherry-pick labels and Continue/Abort follow the actual Git markers, including the reversed stage semantics during rebase. Removing markers alone never marks a conflict resolved.
+- Add/add, modify/delete, rename-associated paths and binary/symlink entries have explicit side/deletion handling. Whole-side choices preserve blob bytes and modes; edited results honor path attributes and line-ending normalization.
+- Gitlink conflicts show both full child OIDs and explicitly record a reviewed side or a locally verified resulting commit. The child branch/selected-commit workflow stays available while the parent is unmerged, preserving unselected dirty child files.
+
+### Git Workspace — Acceptance and isolation hardening (stage 9)
+
+- A broken child no longer hides staged root files as a clean workspace. Healthy selected contexts can preview and commit beside an unavailable sibling while their own state fences and lifecycle/batch completeness checks remain enforced.
+- Checkout and New Branch disable implicit Git submodule recursion, preserving unselected child HEADs, branches and indexes even with `submodule.recurse=true`.
+- Conflict saves refuse multiply hardlinked results instead of truncating an outside file through a shared inode. Reopening a resolved path reloads its new conflict stages; inactive clean documents are released without dropping unsaved drafts or recovery versions.
+- Long repository pickers now scroll inside their dialog; the last context remains reachable by pointer and keyboard instead of spilling below the modal.
+- Unstaged diff reads no longer run an unused status/upstream probe. Staged rename lookup and the existing content, index, HEAD and racy-write cache fences are unchanged.
+- Bounded blob capture avoids separate size probes; small-file fingerprints allocate size-aware read buffers, and staging candidates reuse the exact fenced index snapshot instead of querying it twice. The full fresh post-patch comparison remains enforced.

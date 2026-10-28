@@ -173,10 +173,13 @@ export function SourceControlWorkspacePopup({
             when you activate them. Selecting a ref never changes Git.
           </DialogDescription>
         </div>
-        <div className="grid grid-cols-2 min-h-80 max-h-[70vh]" data-testid="git-workspace-popup">
+        <div
+          className="grid grid-cols-2 grid-rows-[minmax(0,1fr)] min-h-80 max-h-[70vh]"
+          data-testid="git-workspace-popup"
+        >
           <section
             aria-label="Repository picker"
-            className="flex min-w-0 flex-col border-r border-border p-2 gap-2"
+            className="flex min-h-0 min-w-0 flex-col border-r border-border p-2 gap-2"
             onKeyDown={(event) => navigate(event, 'repositories')}
           >
             <div className="flex gap-2">
@@ -216,7 +219,7 @@ export function SourceControlWorkspacePopup({
               </p>
             )}
             <div
-              className="overflow-auto scrollbar-sleek space-y-1"
+              className="min-h-0 flex-1 overflow-auto overscroll-contain scrollbar-sleek space-y-1"
               role="group"
               aria-label="Repository results"
             >
@@ -297,7 +300,7 @@ export function SourceControlWorkspacePopup({
           </section>
           <section
             aria-label="Context refs"
-            className="min-w-0 overflow-auto scrollbar-sleek p-3 space-y-3"
+            className="min-h-0 min-w-0 overflow-auto overscroll-contain scrollbar-sleek p-3 space-y-3"
             onKeyDown={(event) => navigate(event, 'refs')}
           >
             <Button variant="ghost" size="xs" onClick={() => repositorySearch.current?.focus()}>

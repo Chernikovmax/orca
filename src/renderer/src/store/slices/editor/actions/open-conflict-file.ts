@@ -24,6 +24,8 @@ export function createOpenConflictFile(
       set((s) => {
         const id = absolutePath
         const conflict = toOpenConflictMetadata(entry)
+        const contextualConflict =
+          entry.conflictStatus === 'unresolved' && !!options?.gitDiffSelection?.contextId
         const targetGroupId =
           resolveEditorOpenTargetGroupId(s, worktreeId, options?.targetGroupId) ?? undefined
         editorItemTargetGroupId = targetGroupId
@@ -36,7 +38,7 @@ export function createOpenConflictFile(
               }
             : s.trackedConflictPathsByWorktree[worktreeId]
 
-        if (!conflict) {
+        if (!conflict && !contextualConflict) {
           openedConflictFile = false
           return s
         }
@@ -53,6 +55,11 @@ export function createOpenConflictFile(
                     relativePath: entry.path,
                     filePath: absolutePath,
                     conflict,
+                    gitConflict: {
+                      contextId: options?.gitDiffSelection?.contextId,
+                      rootPath: options?.gitDiffRootPath ?? worktreePath
+                    },
+                    runtimeEnvironmentId: options?.runtimeEnvironmentId,
                     diffSource: undefined,
                     skippedConflicts: undefined,
                     conflictReview: undefined,
@@ -80,6 +87,11 @@ export function createOpenConflictFile(
           isDirty: false,
           mode: 'edit',
           conflict,
+          gitConflict: {
+            contextId: options?.gitDiffSelection?.contextId,
+            rootPath: options?.gitDiffRootPath ?? worktreePath
+          },
+          runtimeEnvironmentId: options?.runtimeEnvironmentId,
           isPreview: isPreview || undefined
         }
 

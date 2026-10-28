@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import * as path from 'node:path'
-import type { GitMutationReceipt, GitWorkspaceMutationRequest } from '../../../shared/git-workspace-mutation'
+import type {
+  GitMutationReceipt,
+  GitWorkspaceMutationRequest
+} from '../../../shared/git-workspace-mutation'
 import type { GitStatusEntry } from '../../../shared/git-status-types'
 import type {
   GitContextRef,
@@ -59,8 +62,12 @@ export async function readAuthorizedWorkspace(
     // Legacy callers (CLI/preload file actions) never carried an expectation.
     return { workspace, repository, context: repository.context }
   }
-  const lifecycle = request.action.startsWith('submodule') || request.action.startsWith('previewSubmodule')
-  if (repository.incomplete || (workspace.incomplete && !(lifecycle && hasOnlyUninitializedGaps(workspace)))) {
+  const lifecycle =
+    request.action.startsWith('submodule') || request.action.startsWith('previewSubmodule')
+  if (
+    repository.incomplete ||
+    (lifecycle && workspace.incomplete && !hasOnlyUninitializedGaps(workspace))
+  ) {
     throw new GitMutationError(
       'incomplete',
       'Git context discovery is incomplete; refresh and review the real state before writing'
@@ -76,13 +83,19 @@ export async function readAuthorizedWorkspace(
 }
 
 export function hasOnlyUninitializedGaps(workspace: GitWorkspaceSnapshot): boolean {
-  return workspace.errors.length === 0 &&
+  return (
+    workspace.errors.length === 0 &&
     workspace.repositories.every((repository) => !repository.incomplete) &&
-    workspace.submodules.every((entry) =>
-      entry.availability === 'initialized' ||
-      (entry.availability === 'uninitialized' &&
-        entry.metadataIssues.every((issue) => issue.startsWith('Declared and local URL differ')) &&
-        entry.indexConflictOids.length === 0))
+    workspace.submodules.every(
+      (entry) =>
+        entry.availability === 'initialized' ||
+        (entry.availability === 'uninitialized' &&
+          entry.metadataIssues.every((issue) =>
+            issue.startsWith('Declared and local URL differ')
+          ) &&
+          entry.indexConflictOids.length === 0)
+    )
+  )
 }
 
 export function findEntry(
@@ -99,7 +112,9 @@ export function submoduleForPath(
   filePath: string
 ): SubmoduleEntry | undefined {
   const pathByContext = new Map(
-    workspace.submodules.filter((item) => item.contextId).map((item) => [item.contextId!, item.path])
+    workspace.submodules
+      .filter((item) => item.contextId)
+      .map((item) => [item.contextId!, item.path])
   )
   const parentPath = pathByContext.get(parent.id) ?? ''
   const fullPath = parentPath ? `${parentPath}/${filePath}` : filePath

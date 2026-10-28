@@ -43,6 +43,7 @@ import {
 import { withEditorFileWriteLock } from './editor-file-write-lock'
 import {
   editorSaveWriterView,
+  isEditorWritableView,
   liveEditorRecordView,
   liveEditorSaveWriter
 } from './editor-save-writer-view'
@@ -107,8 +108,8 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
       throw new Error('Large CSV previews are read-only.')
     }
 
-    // Why: read-only tabs (AI Vault View Log) must never write the agent-owned artifact through editor paths.
-    if (liveFile.readOnly === true) {
+    // Why: resolver drafts must use git.mutate; read-only artifacts cannot use filesystem saves.
+    if (!isEditorWritableView(liveFile)) {
       return 'failed'
     }
 

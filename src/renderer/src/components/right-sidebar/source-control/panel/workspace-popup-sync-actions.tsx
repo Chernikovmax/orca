@@ -175,8 +175,9 @@ export function SyncActions({
               : 'No unresolved conflict entries remain. Git still decides whether continuing is possible.'}
           </p>
           <p className="text-muted-foreground">
-            Resolve conflicts outside the full resolver (a later stage), stage the files, then
-            Continue. Abort restores the pre-merge/pre-rebase state.
+            Save results in the conflict resolver, then explicitly Mark Resolved before Continue.
+            Git selects merge, rebase or cherry-pick from its actual operation markers; Abort runs
+            only that operation.
           </p>
           <div className="flex gap-1">
             <Button

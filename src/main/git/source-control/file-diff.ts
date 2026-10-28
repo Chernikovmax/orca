@@ -140,10 +140,15 @@ async function loadDiff(
     return notReusable(result)
   }
 
-  const status = await getStatus(worktreePath, { ...options, includeLineStats: false })
-  const entry = status.entries.find((entry) => entry.path === filePath && entry.area === (staged ? 'staged' : 'unstaged'))
+  let oldPath: string | undefined
+  if (staged) {
+    const status = await getStatus(worktreePath, { ...options, includeLineStats: false })
+    oldPath = status.entries.find(
+      (entry) => entry.path === filePath && entry.area === 'staged'
+    )?.oldPath
+  }
   const result = await readFileDiffDocument(worktreePath, filePath, {
-    oldPath: staged ? entry?.oldPath : undefined,
+    oldPath,
     left: { kind: staged || compareAgainstHead ? 'head' : 'index' },
     right: { kind: staged ? 'index' : 'worktree' }
   }, options)
